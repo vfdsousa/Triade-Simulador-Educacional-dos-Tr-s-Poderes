@@ -1,0 +1,1957 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tríade: Simulador dos Três Poderes</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+html,body{margin:0;background:#121212;color:#fff;-webkit-tap-highlight-color:transparent}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100%}
+button{font-family:inherit;cursor:pointer}
+.bar-fill{transition:width .8s ease,background-color .4s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.fade-in{animation:fadeUp .25s ease}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.shake{animation:shake .3s ease}
+.triade-mark{position:relative;display:inline-flex;align-items:center;gap:.9rem;padding:.55rem 1.15rem;border-radius:999px;background:#1a1a1f;isolation:isolate;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.triade-mark span{font-size:1.9rem;line-height:1;filter:grayscale(1) brightness(1.45) contrast(1.1)}
+@supports (mix-blend-mode:color){.triade-mark::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(90deg,#009c3b 0%,#ffdf00 50%,#1e5bd8 100%);mix-blend-mode:color}}
+@keyframes pop{0%{transform:scale(.6);opacity:0}70%{transform:scale(1.04);opacity:1}100%{transform:scale(1);opacity:1}}
+.pop{animation:pop .4s ease both}
+@keyframes floatUp{0%{transform:translateY(0) scale(.8);opacity:0}15%{opacity:1}100%{transform:translateY(-110px) scale(1.2);opacity:0}}
+.float-em{position:absolute;bottom:34%;font-size:22px;animation:floatUp 2.4s ease-out infinite}
+</style>
+</head>
+<body>
+<div id="app" class="mx-auto w-full max-w-md px-4 py-5"></div>
+<div id="modal"></div>
+<div id="cut"></div>
+<button id="sndBtn" aria-label="Ligar ou desligar o som" class="fixed z-40 grid h-9 w-9 place-items-center rounded-full border border-white/20 bg-black/60 text-base opacity-80" style="right:.75rem;bottom:calc(.75rem + env(safe-area-inset-bottom,0px))">🔊</button>
+
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+const clamp=(v,a=0,b=100)=>Math.max(a,Math.min(b,v));
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CARD='rounded-3xl bg-[#25252a] p-4 ring-1 ring-white/5';
+const RETIRE=75;
+const Y0=2026;
+const KP=0.55,KN=0.85;
+
+/* ===================== DADOS ===================== */
+const UFS=[['AC','Acre'],['AL','Alagoas'],['AP','Amapá'],['AM','Amazonas'],['BA','Bahia'],['CE','Ceará'],['DF','Distrito Federal'],['ES','Espírito Santo'],['GO','Goiás'],['MA','Maranhão'],['MT','Mato Grosso'],['MS','Mato Grosso do Sul'],['MG','Minas Gerais'],['PA','Pará'],['PB','Paraíba'],['PR','Paraná'],['PE','Pernambuco'],['PI','Piauí'],['RJ','Rio de Janeiro'],['RN','Rio Grande do Norte'],['RS','Rio Grande do Sul'],['RO','Rondônia'],['RR','Roraima'],['SC','Santa Catarina'],['SP','São Paulo'],['SE','Sergipe'],['TO','Tocantins']];
+
+const P={
+ jud:{n:'Judiciário',em:'⚖️',txt:'text-amber-400',soft:'bg-amber-400/10',bd:'border-amber-400/40',
+  ranks:[{n:'Juiz Federal',req:{}},{n:'Desembargador Federal (TRF)',req:{pr:62}},{n:'Ministro de Tribunal Superior',req:{pr:70,age:35}},{n:'Ministro do STF',req:{pr:78,es:55,age:35}}]},
+ leg:{n:'Legislativo',em:'📜',txt:'text-sky-400',soft:'bg-sky-400/10',bd:'border-sky-400/40',
+  ranks:[{n:'Deputado Federal',req:{ap:48,age:21}},{n:'Senador da República',req:{ap:58,age:35}},{n:'Presidente do Senado Federal',req:{pr:66,es:60}}]},
+ exe:{n:'Executivo',em:'🏛️',txt:'text-emerald-400',soft:'bg-emerald-400/10',bd:'border-emerald-400/40',
+  ranks:[{n:'Ministro de Estado',req:{es:48,pr:48,age:21}},{n:'Governador de Estado',req:{ap:62,age:30}},{n:'Presidente da República',req:{ap:68,es:58,age:35}}]}
+};
+const TRACKS=[
+ {k:'jud',age:35,t:'Trilha do Judiciário',d:'Começa aos 35 anos como Juiz Federal, após passar em um concurso público super concorrido.',s:{pr:58,ap:40,es:55}},
+ {k:'leg',age:21,t:'Trilha do Legislativo',d:'Começa aos 21 anos como Deputado Federal eleito pela sua região.',s:{pr:45,ap:52,es:48}},
+ {k:'exe',age:35,t:'Trilha do Executivo',d:'Começa aos 35 anos como Governador de Estado, de olho na Presidência da República.',s:{pr:48,ap:50,es:44}}
+];
+
+/* efeitos: [prestígio, apoio, estabilidade, IDH (milésimos), segurança jurídica/orçamento] */
+const EVENTS={
+jud:[
+{t:'Privatização na mira do STF',d:'Uma estatal estratégica foi privatizada por lei aprovada às pressas. Partidos questionam a constitucionalidade e você é o relator do caso.',n:'Controle de constitucionalidade: cabe ao STF verificar se leis e atos respeitam a Constituição.',o:[
+ {l:'Declarar a lei inconstitucional e barrar a venda',r:'A decisão agradou quem temia perda de patrimônio público, mas investidores reagiram mal e o governo chiou.',e:[5,10,-12,-2,-8]},
+ {l:'Validar a privatização com regras rígidas de fiscalização',r:'Você manteve a lei e impôs transparência. Sindicatos protestaram, mas o mercado respirou aliviado.',e:[8,-8,8,3,10]},
+ {l:'Pedir vista e adiar o julgamento',r:'O caso ficou na gaveta. Críticos falaram em omissão, mas a crise esfriou por ora.',e:[-10,-3,10,0,-5]}]},
+{t:'Greve em serviços essenciais',d:'Agentes de saúde cruzam os braços e hospitais públicos ficam sobrecarregados. O governo pede que você declare a greve abusiva.',n:'A Constituição garante o direito de greve, mas a lei define os serviços essenciais e o atendimento mínimo.',o:[
+ {l:'Garantir o direito de greve, com 80% do serviço mantido',r:'A categoria comemorou e a população viu equilíbrio. O governo reclamou da pressão no caixa.',e:[6,8,-4,1,-6]},
+ {l:'Declarar a greve abusiva e multar o sindicato',r:'Os hospitais voltaram a funcionar, mas a decisão foi vista como dura demais com os trabalhadores.',e:[-4,-12,8,1,5]},
+ {l:'Mediar um acordo entre governo e sindicato',r:'Depois de semanas de audiências, houve acordo. Custou verba, mas evitou o conflito aberto.',e:[10,3,5,2,-6]}]},
+{t:'Pedido de prisão de um político influente',d:'Um senador poderoso é acusado de corrupção. As provas são robustas, mas o Congresso e aliados pressionam por cautela.',n:'Parlamentares só podem ser presos em flagrante de crime inafiançável, e a respectiva Casa decide se mantém a prisão (art. 53).',o:[
+ {l:'Decretar a prisão preventiva',r:'O país parou para assistir. A decisão virou símbolo de combate à corrupção, mas abriu guerra com o Congresso.',e:[8,14,-15,1,4]},
+ {l:'Aplicar medidas cautelares: afastamento do cargo e tornozeleira',r:'Solução intermediária: o político foi afastado sem ser preso, e as críticas vieram dos dois lados.',e:[6,4,-3,0,3]},
+ {l:'Aguardar mais provas antes de decidir',r:'A cautela acalmou o Congresso, mas muita gente acusou o tribunal de se omitir.',e:[-12,-8,10,0,-6]}]},
+{t:'Quem decide na emergência sanitária?',d:'Em plena crise de saúde, União, estados e municípios brigam na Justiça sobre quem pode impor restrições.',n:'O Brasil é uma federação: União, estados e municípios têm competências próprias e comuns, inclusive na saúde.',o:[
+ {l:'Reconhecer a autonomia de estados e municípios',r:'Governadores e prefeitos ganharam poder de decisão. A resposta local foi mais ágil, mas houve atritos com o governo federal.',e:[6,8,-5,5,0]},
+ {l:'Concentrar as decisões no governo federal',r:'A coordenação nacional ficou mais clara, porém governos locais e especialistas criticaram a centralização.',e:[-4,-6,6,-3,4]},
+ {l:'Exigir cooperação entre os três níveis de governo',r:'Você obrigou todos a negociar. Foi trabalhoso e caro, mas melhorou a resposta do país.',e:[9,4,2,3,-3]}]},
+{t:'Marco temporal de terras indígenas',d:'O tribunal discute se povos indígenas só têm direito às terras que ocupavam em 1988. Produtores rurais e comunidades indígenas pressionam por lados opostos.',n:'Os direitos originários dos povos indígenas sobre suas terras estão previstos no art. 231 da Constituição.',o:[
+ {l:'Rejeitar a tese e proteger as demarcações',r:'As comunidades indígenas comemoraram, enquanto o setor agropecuário reagiu com protestos no Congresso.',e:[5,4,-10,4,-6]},
+ {l:'Aceitar a tese, privilegiando a segurança de proprietários',r:'Produtores celebraram a previsibilidade; organizações indígenas e ambientalistas criticaram duramente.',e:[-6,-5,6,-2,8]},
+ {l:'Adotar regra de transição com indenizações',r:'A solução intermediária reduziu o conflito, mas exigiu bilhões em indenizações.',e:[8,1,3,1,-8]}]},
+{t:'Desinformação na eleição',d:'A campanha eleitoral é inundada por boatos nas redes. Candidatos pedem que a Justiça Eleitoral remova conteúdos e puna plataformas.',n:'A Justiça Eleitoral organiza e fiscaliza as eleições; o TSE está no topo dessa estrutura.',o:[
+ {l:'Ordenar a remoção rápida de conteúdos comprovadamente falsos',r:'Boatos perderam alcance, mas surgiram críticas de que a medida ameaçava a liberdade de expressão.',e:[4,-6,-4,1,6]},
+ {l:'Agir apenas após análise caso a caso',r:'A liberdade de expressão foi preservada, porém parte dos boatos circulou até o fim da campanha.',e:[6,6,2,0,-4]},
+ {l:'Multar plataformas e exigir transparência dos algoritmos',r:'As empresas recorreram, mas o debate público sobre a responsabilidade das redes avançou.',e:[3,2,-5,1,3]}]},
+{t:'Prisão após condenação em segunda instância',d:'O tribunal revisita quando um condenado pode começar a cumprir pena. A opinião pública está dividida e o caso envolve nomes conhecidos.',n:'A Constituição diz que ninguém será considerado culpado até o trânsito em julgado da sentença (art. 5º, LVII).',o:[
+ {l:'Permitir a execução da pena já na segunda instância',r:'A medida foi aplaudida como fim da impunidade, mas advogados alertaram para riscos de injustiça.',e:[-2,12,-6,1,-4]},
+ {l:'Exigir o trânsito em julgado, com todos os recursos esgotados',r:'Você seguiu o texto da Constituição à risca. Críticos disseram que a decisão estimula a impunidade.',e:[8,-12,4,0,6]},
+ {l:'Permitir a prisão após decisão do STJ',r:'Um meio-termo que dividiu opiniões, mas foi visto como juridicamente equilibrado.',e:[6,0,3,0,2]}]},
+{t:'Superlotação dos presídios',d:'Presídios operam bem acima da capacidade e rebeliões preocupam. O Judiciário pode intervir na política carcerária.',n:'O CNJ fiscaliza o Judiciário e coordena políticas nacionais, como os mutirões carcerários.',o:[
+ {l:'Determinar mutirão carcerário e ampliar penas alternativas',r:'Milhares de casos foram revistos. A população criticou a soltura de presos, mas a pressão nos presídios diminuiu.',e:[6,-8,0,2,4]},
+ {l:'Cobrar da União e dos estados a construção de vagas',r:'A cobrança gerou atrito com governos, que alegaram falta de verba.',e:[4,4,-6,1,-8]},
+ {l:'Manter as decisões atuais e evitar interferir',r:'Sem mudanças, a crise continuou e a imagem do Judiciário ficou desgastada.',e:[-8,4,6,-2,-3]}]},
+{t:'Foro privilegiado em xeque',d:'Cresce a discussão sobre limitar o foro por prerrogativa de função, que leva processos de autoridades direto a tribunais superiores.',n:'Certas autoridades são julgadas por tribunais superiores, e não pela primeira instância: é o foro por prerrogativa de função.',o:[
+ {l:'Restringir o foro a crimes ligados ao mandato',r:'Mais processos desceram à primeira instância. A decisão foi popular, mas incomodou o meio político.',e:[7,10,-8,1,2]},
+ {l:'Manter o foro como está',r:'Você preservou o sistema vigente. Houve acusações de proteção a autoridades.',e:[-8,-10,8,0,-2]},
+ {l:'Sugerir ao Congresso uma emenda constitucional',r:'Você devolveu o tema aos parlamentares, que arrastaram a discussão sem pressa.',e:[5,2,5,0,-1]}]}
+],
+leg:[
+{t:'Reforma tributária no plenário',d:'Empresas, estados e municípios disputam o desenho de um novo sistema de impostos sobre o consumo. O texto chega para votação.',n:'Mudar o sistema tributário exige emenda constitucional: três quintos dos votos em cada Casa, em dois turnos.',o:[
+ {l:'Votar o texto que unifica tributos sobre consumo (IVA)',r:'O sistema ficou mais simples e previsível, mas setores perderam benefícios e reclamaram.',e:[8,-6,-2,5,8]},
+ {l:'Manter o sistema atual com pequenos ajustes',r:'Evitou conflitos de curto prazo, porém o problema da complexidade permaneceu.',e:[-4,4,6,-1,-2]},
+ {l:'Apoiar uma reforma que taxe grandes patrimônios',r:'A proposta ganhou as ruas, mas gerou forte reação de empresários e parlamentares.',e:[4,12,-10,4,-3]}]},
+{t:'Impeachment de um ministro do Supremo',d:'Um grupo de senadores pede o impeachment de um ministro do STF por decisões polêmicas. Sua posição pesa na articulação do plenário.',n:'O Senado julga ministros do STF por crime de responsabilidade; a condenação exige 2/3 dos votos (54 dos 81 senadores).',o:[
+ {l:'Apoiar o afastamento',r:'Sua posição agradou a base, mas abriu uma crise sem precedentes entre os Poderes.',e:[3,10,-10,-1,-3]},
+ {l:'Defender a independência do Judiciário',r:'Apoiadores o chamaram de covarde, mas você ganhou respeito entre juristas.',e:[4,-6,8,0,3]},
+ {l:'Propor uma CPI para investigar antes de qualquer decisão',r:'A CPI ganhou holofotes e adiou o confronto, consumindo tempo e energia do Congresso.',e:[6,4,-3,0,-2]}]},
+{t:'Emendas: saúde ou segurança?',d:'Você controla uma boa parcela de emendas parlamentares. Prefeitos pedem verba para hospitais; policiais cobram viaturas e equipamentos.',n:'Emendas parlamentares permitem que deputados e senadores indiquem onde aplicar parte do orçamento federal.',o:[
+ {l:'Destinar tudo à saúde: UPAs e hospitais',r:'Filas diminuíram em várias cidades e sua imagem melhorou, mas o orçamento ficou apertado em outras áreas.',e:[4,10,0,6,-6]},
+ {l:'Destinar tudo à segurança pública',r:'Novas viaturas e equipamentos agradaram o eleitorado, embora a saúde tenha reclamado.',e:[2,8,2,1,-6]},
+ {l:'Dividir os recursos por critérios técnicos e publicar tudo',r:'A transparência elevou sua reputação, mas você desagradou prefeitos aliados.',e:[10,0,-4,3,4]}]},
+{t:'Reforma da Previdência',d:'Os gastos com aposentadorias crescem mais rápido que a arrecadação. O governo pede votos para uma reforma impopular.',n:'Mudanças na Previdência exigem emenda constitucional: 3/5 dos votos em cada Casa, em dois turnos.',o:[
+ {l:'Aprovar idade mínima com regras de transição',r:'As contas melhoraram no longo prazo, mas você foi alvo de protestos de servidores e trabalhadores.',e:[6,-12,3,1,12]},
+ {l:'Aprovar uma versão suavizada',r:'Você ganhou popularidade ao reduzir os cortes, mas o rombo seguiu aberto.',e:[-2,8,0,0,-8]},
+ {l:'Votar contra a reforma',r:'Foi aplaudido nas ruas, enquanto economistas alertaram para o risco fiscal.',e:[-4,12,-8,-1,-14]}]},
+{t:'Regra fiscal e investimentos',d:'O governo quer flexibilizar o limite de gastos para ampliar investimentos sociais. Economistas alertam para o risco da dívida.',n:'Regras fiscais limitam o crescimento da despesa pública para controlar a dívida do país.',o:[
+ {l:'Defender o limite de gastos como está',r:'Os mercados aprovaram a disciplina, enquanto movimentos sociais criticaram os cortes.',e:[4,-6,4,-1,10]},
+ {l:'Flexibilizar para ampliar saúde e educação',r:'Mais recursos chegaram às políticas sociais, mas a dívida pública passou a preocupar.',e:[-2,8,0,4,-8]},
+ {l:'Criar uma regra com metas e exceções claras',r:'Uma solução negociada: menos rígida que a anterior, mas ainda previsível.',e:[6,0,4,2,3]}]},
+{t:'Projeto Ficha Limpa',d:'Um projeto de iniciativa popular quer barrar candidaturas de condenados por órgãos colegiados. Partidos temem perder quadros importantes.',n:'A Lei da Ficha Limpa (2010) nasceu de iniciativa popular, com mais de 1 milhão de assinaturas.',o:[
+ {l:'Apoiar o projeto integralmente',r:'Você virou voz da sociedade civil, mas gerou desconforto no seu partido.',e:[8,12,-6,1,3]},
+ {l:'Apoiar com mudanças que suavizem as regras',r:'A lei passou diluída, e a sociedade civil acusou você de enfraquecê-la.',e:[0,2,4,0,0]},
+ {l:'Votar contra por insegurança jurídica',r:'Você foi duramente criticado, mas manteve a base partidária unida.',e:[-10,-12,4,0,-2]}]},
+{t:'Regras para a internet',d:'O Congresso debate direitos e deveres de usuários e empresas na internet, incluindo privacidade e liberdade de expressão.',n:'O Marco Civil da Internet (2014) definiu princípios como a neutralidade da rede e a proteção da privacidade.',o:[
+ {l:'Aprovar regras fortes de privacidade e neutralidade de rede',r:'Usuários ganharam direitos, e as grandes empresas reclamaram dos custos.',e:[8,6,-2,2,6]},
+ {l:'Defender regras mais brandas para as empresas',r:'O setor de tecnologia aplaudiu, mas entidades de defesa do consumidor criticaram.',e:[-4,-4,4,1,-2]},
+ {l:'Adiar a votação para ampliar as audiências públicas',r:'O debate amadureceu, mas a falta de regras seguiu gerando conflitos.',e:[2,-2,4,0,0]}]},
+{t:'Financiamento da educação básica',d:'Está em discussão a renovação do fundo que distribui verbas da educação entre estados e municípios, essencial para cidades pobres.',n:'O Fundeb financia a educação básica e tornou-se permanente em 2020.',o:[
+ {l:'Tornar o fundo permanente e ampliar a contribuição da União',r:'Escolas de cidades pobres receberam mais verba, mas o caixa da União ficou pressionado.',e:[6,10,-2,7,-8]},
+ {l:'Aprovar uma versão enxuta, sem aumento de custo',r:'A solução fiscal preservou o orçamento, mas ficou aquém do pedido das prefeituras.',e:[2,2,4,3,0]},
+ {l:'Condicionar parte das verbas a metas de aprendizagem',r:'O repasse virou incentivo à qualidade, embora algumas cidades tenham reclamado.',e:[6,-4,3,4,4]}]}
+],
+exe:[
+{t:'Crise inflacionária',d:'Os preços de alimentos e combustíveis disparam e a popularidade do governo despenca. Auxiliares divergem sobre o remédio.',n:'O Banco Central usa a taxa básica de juros (Selic) como principal instrumento contra a inflação.',o:[
+ {l:'Subir juros e cortar gastos',r:'A inflação cedeu, mas o crédito encareceu e a população sentiu o aperto.',e:[6,-12,4,-2,12]},
+ {l:'Congelar preços e tarifas',r:'O alívio foi imediato e popular, mas produtos começaram a faltar e as contas públicas se deterioraram.',e:[-6,12,-4,-1,-10]},
+ {l:'Fazer um pacto com empresas e sindicatos',r:'O acordo segurou os preços por um tempo, mas exigiu concessões custosas ao governo.',e:[4,3,-6,2,-3]}]},
+{t:'Demarcação de terras indígenas',d:'Há processos de demarcação prontos para sua assinatura. Bancadas ruralistas ameaçam travar sua pauta no Congresso.',n:'As terras indígenas são demarcadas pelo Executivo, após estudos técnicos da Funai.',o:[
+ {l:'Assinar os decretos de demarcação',r:'Povos indígenas e ambientalistas comemoraram, mas a bancada ruralista abriu uma frente de oposição.',e:[4,-2,-10,3,-4]},
+ {l:'Suspender até haver acordo com o Congresso',r:'A paz com o Congresso voltou, mas organizações apontaram descumprimento de direitos.',e:[-6,2,8,-1,4]},
+ {l:'Demarcar parte das áreas e indenizar ocupantes',r:'A solução reduziu o conflito, porém exigiu um volume alto de recursos.',e:[6,0,0,2,-10]}]},
+{t:'Orçamento e base aliada',d:'O orçamento do ano precisa passar no Congresso. Sem maioria garantida, partidos exigem cargos e verbas em troca de votos.',n:'O Executivo propõe o orçamento e o Congresso o aprova, por isso governar exige formar maioria.',o:[
+ {l:'Negociar com cargos e emendas',r:'O orçamento passou rápido, mas a imprensa criticou o toma lá dá cá.',e:[-8,0,14,1,-6]},
+ {l:'Negociar abertamente em torno de uma agenda de resultados',r:'Foi mais lento e difícil, mas a transparência elevou a confiança do público.',e:[6,6,-4,2,2]},
+ {l:'Governar por medidas provisórias',r:'Você aprovou parte da pauta, mas parlamentares reagiram com sabotagem e críticas ao abuso de MPs.',e:[-4,6,-12,1,0]}]},
+{t:'Paralisação dos caminhoneiros',d:'Caminhoneiros bloqueiam rodovias contra o preço do diesel. Supermercados e postos começam a ficar sem produtos.',n:'A logística depende de estradas e combustíveis: paralisações podem afetar toda a economia em poucos dias.',o:[
+ {l:'Atender o pedido com subsídio ao diesel',r:'Os bloqueios acabaram rápido, mas o subsídio pesou no orçamento.',e:[-4,12,4,0,-12]},
+ {l:'Acionar forças federais para liberar as rodovias',r:'As estradas foram liberadas, porém a ação foi vista como truculenta.',e:[0,-8,-4,-1,4]},
+ {l:'Abrir uma mesa de negociação permanente',r:'O diálogo reduziu a tensão aos poucos, com custo político moderado.',e:[6,2,3,1,-4]}]},
+{t:'Programa de transferência de renda',d:'Milhões de famílias dependem de um programa de renda mínima. Há pressão para ampliar o benefício, enquanto o caixa está apertado.',n:'Programas como o Bolsa Família condicionam o benefício a vacinação e frequência escolar.',o:[
+ {l:'Ampliar o valor e o número de famílias',r:'A pobreza caiu e sua popularidade subiu, mas o orçamento sentiu o impacto.',e:[2,14,-2,7,-10]},
+ {l:'Focalizar nos mais pobres, com contrapartidas',r:'O programa ficou mais eficiente, mas houve críticas de quem ficou de fora.',e:[6,4,0,5,-4]},
+ {l:'Reduzir o programa para conter gastos',r:'As contas melhoraram, porém a pobreza voltou a crescer e você foi duramente criticado.',e:[-2,-12,4,-4,10]}]},
+{t:'Queimadas e crise ambiental',d:'Focos de incêndio disparam durante a seca e a fumaça cobre cidades. O país é cobrado dentro e fora das fronteiras.',n:'A fiscalização ambiental é papel de órgãos do Executivo, como o Ibama e o ICMBio.',o:[
+ {l:'Reforçar a fiscalização e aplicar multas pesadas',r:'Os focos diminuíram, mas produtores rurais criticaram o endurecimento.',e:[6,-2,-6,2,-4]},
+ {l:'Priorizar a produção e flexibilizar regras',r:'O setor produtivo comemorou, mas a imagem do país no exterior sofreu.',e:[-8,4,6,-3,2]},
+ {l:'Formar uma aliança com estados e ONGs',r:'O trabalho conjunto trouxe resultados e boa imagem, mas demandou verbas extras.',e:[8,4,-2,3,-6]}]},
+{t:'O futuro de uma estatal',d:'Uma grande estatal dá prejuízo e consome recursos. Economistas defendem vendê-la, enquanto sindicatos e parte da população resistem.',n:'Concessões e privatizações seguem regras de licitação e são fiscalizadas por órgãos como o TCU.',o:[
+ {l:'Privatizar para reduzir a dívida pública',r:'O caixa do governo melhorou, mas houve protestos e críticas de perda de patrimônio.',e:[0,-8,-2,0,12]},
+ {l:'Conceder a gestão com metas de investimento',r:'O modelo atraiu investimentos e manteve o controle público, com críticas moderadas.',e:[6,0,0,4,4]},
+ {l:'Manter a estatal e reformar sua gestão',r:'Houve alguma melhora, mas os resultados demoraram a aparecer.',e:[2,4,0,1,-6]}]},
+{t:'Risco de apagão',d:'A seca reduz os reservatórios das hidrelétricas e há risco de apagão. O governo precisa decidir como reforçar a oferta de energia.',n:'A energia é um serviço regulado pela Aneel, e o Executivo planeja a oferta por meio de leilões.',o:[
+ {l:'Acelerar obras com licenciamento simplificado',r:'A oferta de energia aumentou, mas ambientalistas criticaram a pressa.',e:[-2,6,2,3,-6]},
+ {l:'Realizar leilão de energia renovável',r:'O leilão atraiu investimentos limpos e reduziu riscos futuros.',e:[6,0,0,4,2]},
+ {l:'Decretar racionamento preventivo',r:'O apagão foi evitado, porém a população reclamou muito do racionamento.',e:[4,-14,-2,-1,6]}]}
+]};
+
+/* ===================== ESTADO ===================== */
+const app=$('#app'),modalEl=$('#modal');
+let draft={name:'',uf:'',track:'',gender:'m',skin:1,hair:'curto',hcol:1,beard:'none',glasses:false,prev:0,party:'PP'};
+let st=null,busy=false;
+
+const FEM={'Juiz Federal':'Juíza Federal','Desembargador Federal (TRF)':'Desembargadora Federal (TRF)','Ministro de Tribunal Superior':'Ministra de Tribunal Superior','Ministro do STF':'Ministra do STF','Deputado Federal':'Deputada Federal','Senador da República':'Senadora da República','Ministro de Estado':'Ministra de Estado','Governador de Estado':'Governadora de Estado'};
+const curGender=()=>st&&st.look?st.look.gender:draft.gender;
+const gn=n=>curGender()==='f'&&FEM[n]?FEM[n]:n;
+const cargo=()=>gn(P[st.power].ranks[st.rank].n);
+const fmtIdh=v=>v.toFixed(3).replace('.',',');
+const colorOf=v=>v>=60?'#34d399':v>=35?'#fbbf24':'#f87171';
+
+/* ===================== AVATAR (SVG) ===================== */
+const SKINS=['#f6d5b8','#e8b88f','#c98d5f','#a8693f','#7a4a2b','#4f2f1c'];
+const HCOLS=[['Preto','#1f1612'],['Castanho','#4a2e1c'],['Ruivo','#9a3f1a'],['Loiro','#d9b26a']];
+const HAIRS={
+  m:[['curto','Curto'],['crespo','Black Power'],['careca','Careca']],
+  f:[['chanel','Chanel'],['longo','Longo liso'],['cacheado','Cacheado']]
+};
+const OUTFIT={
+  jud:{c:'#15151a',toga:true},
+  leg0:{c:'#17171c',tie:'#0e0e11',stripes:true},
+  leg1:{c:'#b4b8be',tie:'#15151a'},
+  leg:{c:'#17171c',tie:'#0e0e11',stripes:true},
+  exe0:{c:'#1b2a50',tie:'#1d4ed8',clip:true,pocket:'#1d4ed8'},
+  exe1:{c:'#d39a2c',tie:'#5a3220',pocket:'#5a3220'},
+  exe2:{c:'#1c2236',tie:'#101522',sash:true},
+  exe:{c:'#1b2a50',tie:'#1d4ed8',clip:true,pocket:'#1d4ed8'},
+  pres:{c:'#1c2236',tie:'#101522',sash:true},
+  pres0:{c:'#1c2236',tie:'#101522'},
+  none:{c:'#4b5563',tie:null}
+};
+function hexRgb(h){const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255];}
+function rgbHex(a){return '#'+a.map(v=>Math.round(clamp(v,0,255)).toString(16).padStart(2,'0')).join('');}
+function mix(a,b,t){const x=hexRgb(a),y=hexRgb(b);return rgbHex(x.map((v,i)=>v+(y[i]-v)*t));}
+const shade=(h,f)=>mix(h,'#000000',f);
+function avatarSvg(look,age,power){
+  const t=v=>clamp(v,0,1);
+  const gray=t((age-38)/36),fore=t((age-42)/20),crow=t((age-48)/18),naso=t((age-52)/18),bags=t((age-55)/15),spots=t((age-60)/14);
+  const F=look.gender==='f',hair=look.hair;
+  const skin=SKINS[look.skin],wr=shade(skin,.32),hc=mix(HCOLS[look.hcol][1],'#ececf0',gray);
+  const brow=mix(hair==='careca'||hair==='raspado'?'#3a2a20':HCOLS[look.hcol][1],'#d8d8dc',gray*0.9);
+  let okey=power;
+  if((power==='leg'||power==='exe')&&st&&look===st.look&&power===st.power)okey=power==='leg'?(st.rank===0?'leg0':'leg1'):'exe'+st.rank;
+  const of=OUTFIT[okey]||OUTFIT[power]||OUTFIT.none;
+  const rx=F?11.4:12.3,ry=F?13.8:14;
+  const cap=`<path d="M19.6 27Q17.5 11 32 10.2Q46.5 11 44.4 27Q42.5 19.5 32 19Q21.5 19.5 19.6 27Z" fill="${hc}"/>`;
+  const lockL=`<path d="M18 28Q16 40 17 52Q21 50 22.5 44Q21 36 21 28Z" fill="${hc}"/>`;
+  const lockR=`<path d="M46 28Q48 40 47 52Q43 50 41.5 44Q43 36 43 28Z" fill="${hc}"/>`;
+  let back='',front='';
+  switch(hair){
+    case 'curto':front=cap;break;
+    case 'social':front=cap+`<path d="M21 17Q32 7.5 43 17Q43 12 32 9.4Q21 12 21 17Z" fill="${hc}"/>`;break;
+    case 'topete':back=`<ellipse cx="31" cy="11.5" rx="11.5" ry="5.5" fill="${hc}"/>`;front=cap;break;
+    case 'crespo':back=`<ellipse cx="32" cy="19" rx="16" ry="13" fill="${hc}"/>`;front=cap;break;
+    case 'raspado':front=`<path d="M19.6 27Q17.5 11 32 10.2Q46.5 11 44.4 27Q42.5 19.5 32 19Q21.5 19.5 19.6 27Z" fill="${mix(hc,skin,.6)}"/>`;break;
+    case 'pixie':front=cap+`<path d="M20 24Q22 14 34 13Q43 13.5 44.4 25Q40 18.5 31 19.5Q24 20.5 20 24Z" fill="${hc}"/>`;break;
+    case 'chanel':back=`<path d="M17.5 27Q17 10 32 9.5Q47 10 46.5 27L47.5 38.5Q44.5 41.5 41.5 39L22.5 39Q19.5 41.5 16.5 38.5Z" fill="${hc}"/>`;
+      front=`<path d="M19.6 27Q17.8 11 32 10.2Q46.2 11 44.4 27Q42 17.5 32 17.2Q22 17.5 19.6 27Z" fill="${hc}"/>`;break;
+    case 'longo':back=`<path d="M17.5 27Q17 9 32 9Q47 9 46.5 27L49 52Q40 55 32 52Q24 55 15 52Z" fill="${hc}"/>`;front=cap+lockL+lockR;break;
+    case 'ondulado':back=`<path d="M17 27Q15.5 9 32 8.5Q48.5 9 47 27Q49.5 34 47 40Q49 46 47 51Q40 53 32 51Q24 53 17 51Q15 46 17 40Q14.5 34 17 27Z" fill="${hc}"/>`;
+      front=cap+`<path d="M18.5 28Q15.5 36 18.5 42Q16.5 47 19.5 51Q22 48 22 43Q20 36 21 28Z" fill="${hc}"/><path d="M45.5 28Q48.5 36 45.5 42Q47.5 47 44.5 51Q42 48 42 43Q44 36 43 28Z" fill="${hc}"/>`;break;
+    case 'cacheado':back=`<ellipse cx="32" cy="25" rx="18.5" ry="17.5" fill="${hc}"/>`+[[17,18],[22,10],[32,7.5],[42,10],[47,18],[15.5,28],[48.5,28],[17,37],[47,37]].map(c=>`<circle cx="${c[0]}" cy="${c[1]}" r="3.4" fill="${hc}"/>`).join('');front=cap;break;
+    case 'coque':back=`<circle cx="32" cy="7" r="5.8" fill="${hc}"/>`;front=cap;break;
+    case 'rabo':back=`<path d="M43 17Q55 17 55 34Q54.5 46 50.5 54Q50 40 43.5 29Z" fill="${hc}"/>`;front=cap+`<circle cx="44" cy="18.5" r="1.7" fill="#e84a8a"/>`;break;
+  }
+  const line=(d,o,w)=>o>0.02?`<path d="${d}" fill="none" stroke="${wr}" stroke-width="${w||.6}" stroke-linecap="round" opacity="${o.toFixed(2)}"/>`:'';
+  const bodyPath=F?'M8 64Q10 50 27 46.5L37 46.5Q54 50 56 64Z':'M6 64Q8 49 27 46.5L37 46.5Q56 49 58 64Z';
+  const jk=of.c,dk=shade(jk,.35);
+  const lapels=of.toga||of.tee?'':`<path d="M27 46.5L30.8 57.5M37 46.5L33.2 57.5" stroke="${dk}" stroke-width=".9" fill="none" stroke-linecap="round"/>`;
+  const shirt=of.tee?'':of.toga?`<path d="M28.3 46.5L32 53L35.7 46.5Z" fill="#f4f4f6"/>`:`<path d="M27 46.5L32 55L37 46.5Z" fill="#f4f4f6"/>`+(of.stripes?`<path d="M29.2 47.2L31 52M32 48L32 54M34.8 47.2L33 52" stroke="#c9ccd3" stroke-width=".5" fill="none"/>`:'');
+  const tieSvg=of.tie?`<path d="M30.8 49.8L33.2 49.8L33 51.8L31 51.8Z" fill="${of.tie}"/><path d="M31 51.6L33 51.6L33.9 58.5L32 60.8L30.1 58.5Z" fill="${of.tie}"/>`+(of.clip?`<rect x="30.5" y="55.2" width="3" height=".9" fill="#dfe3ea"/>`:''):'';
+  const pocket=of.pocket?`<path d="M40 55.5L45 55.2L45 57.4L40 57.4Z" fill="${of.pocket}"/>`:'';
+  const togaSvg=of.toga?`<path d="M9 64Q9.5 52 20.5 48L27 47L24 55Q17 57.5 12.5 64Z" fill="#26262d" stroke="${dk}" stroke-width=".5"/><path d="M55 64Q54.5 52 43.5 48L37 47L40 55Q47 57.5 51.5 64Z" fill="#26262d" stroke="${dk}" stroke-width=".5"/><path d="M26 56.5Q32 59 38 56.5" fill="none" stroke="#3b3b45" stroke-width=".8"/><circle cx="26" cy="56.5" r="1" fill="#6b4a2b"/><circle cx="38" cy="56.5" r="1" fill="#6b4a2b"/>`:'';
+  const sash=of.sash?`<path d="M21.5 47.2L29.8 46.5L55.8 64L46 64Z" fill="#2fae5b" stroke="#1f8a44" stroke-width=".4"/><path d="M25.7 47L51 64" stroke="#ffdf00" stroke-width="2.8"/><circle cx="43" cy="57.6" r="2.3" fill="#ffdf00" stroke="#1e3a9a" stroke-width=".7"/><circle cx="43" cy="57.6" r=".9" fill="#1e3a9a"/>`:'';
+  const body=`<rect x="${F?28.5:28}" y="39" width="${F?7:8}" height="10" rx="2" fill="${shade(skin,.12)}"/><path d="${bodyPath}" fill="${jk}"/>`+lapels+shirt+tieSvg+pocket+togaSvg+sash;
+  const sigText=of.txt?`<text x="32" y="59" text-anchor="middle" font-size="7.5" font-weight="900" fill="#fff" font-family="Arial Black,Arial,sans-serif">${of.txt}</text>`:'';
+  const spotsSvg=spots>0.02?[[23.5,34,.8],[40.8,24.5,.7],[37.6,38.5,.6],[25,22.5,.6],[41,33,.5]].map(s=>`<circle cx="${s[0]}" cy="${s[1]}" r="${s[2]}" fill="${shade(skin,.3)}" opacity="${(spots*.7).toFixed(2)}"/>`).join(''):'';
+  const glasses=look.glasses?`<g fill="none" stroke="#1b1b20" stroke-width=".9"><circle cx="26.5" cy="28.5" r="4.4"/><circle cx="37.5" cy="28.5" r="4.4"/><path d="M30.9 28.2Q32 27.4 33.1 28.2"/><path d="M22.1 28L19.8 27.6M41.9 28L44.2 27.6"/></g>`:'';
+  const beard=!F&&look.beard==='barba'?`<path d="M20.8 29Q21 41.5 32 44.4Q43 41.5 43.2 29Q42 35.5 38.5 37.4Q32 35.8 25.5 37.4Q22 35.5 20.8 29Z" fill="${hc}"/>`
+    :!F&&look.beard==='bigode'?`<path d="M27.5 35.8Q32 33.6 36.5 35.8Q32 37.6 27.5 35.8Z" fill="${hc}"/>`:'';
+  const fem=F?`<path d="M24.3 27.7Q26.5 26.5 28.7 27.7M35.3 27.7Q37.5 26.5 39.7 27.7M24.3 27.4L23 26.5M39.7 27.4L41 26.5" fill="none" stroke="#2a1a12" stroke-width=".6" stroke-linecap="round"/><ellipse cx="25" cy="33.6" rx="2.3" ry="1.2" fill="#e8737a" opacity=".2"/><ellipse cx="39" cy="33.6" rx="2.3" ry="1.2" fill="#e8737a" opacity=".2"/><circle cx="19.8" cy="32.6" r=".9" fill="#f5c542"/><circle cx="44.2" cy="32.6" r=".9" fill="#f5c542"/>`:'';
+  const mouth=F?`<path d="M28.6 37.8Q30.4 36.9 32 37.5Q33.6 36.9 35.4 37.8Q32 40.6 28.6 37.8Z" fill="#c4565f"/>`:`<path d="M28.5 38Q32 40.3 35.5 38" fill="none" stroke="#8a3d3d" stroke-width="1" stroke-linecap="round"/>`;
+  return `<svg viewBox="0 0 64 64" class="h-full w-full" aria-hidden="true">${back}${body}${sigText}
+    <circle cx="${32-rx+.4}" cy="29.5" r="2.4" fill="${skin}"/><circle cx="${32+rx-.4}" cy="29.5" r="2.4" fill="${skin}"/>
+    <ellipse cx="32" cy="28" rx="${rx}" ry="${ry}" fill="${skin}"/>
+    <ellipse cx="26.5" cy="28.5" rx="2.2" ry="1.5" fill="#fff"/><ellipse cx="37.5" cy="28.5" rx="2.2" ry="1.5" fill="#fff"/>
+    <circle cx="26.5" cy="28.5" r="${F?1.2:1.1}" fill="#2a1a12"/><circle cx="37.5" cy="28.5" r="${F?1.2:1.1}" fill="#2a1a12"/>
+    ${fem}
+    <path d="M23.5 25.4Q26.5 24 29.2 25.2M34.8 25.2Q37.5 24 40.5 25.4" fill="none" stroke="${brow}" stroke-width="${F?1:1.3}" stroke-linecap="round"/>
+    <path d="M32 29.5L30.8 34.2Q32 35 33.2 34.2" fill="none" stroke="${wr}" stroke-width=".7" stroke-linecap="round" opacity=".7"/>
+    ${beard}${mouth}
+    ${front}
+    ${line('M24.5 21.3Q32 19.9 39.5 21.3',fore)}${line('M25.5 23.3Q32 22 38.5 23.3',fore*.8)}
+    ${line('M22.6 27.2L20.8 26.2M22.4 28.7L20.5 28.9M22.8 30L21.2 31',crow)}${line('M41.4 27.2L43.2 26.2M41.6 28.7L43.5 28.9M41.2 30L42.8 31',crow)}
+    ${line('M24 31.2Q26.5 33 29 31.2',bags*.8)}${line('M35 31.2Q37.5 33 40 31.2',bags*.8)}
+    ${line('M27.6 33.5Q25.6 37 27.6 40.2',naso)}${line('M36.4 33.5Q38.4 37 36.4 40.2',naso)}
+    ${spotsSvg}${glasses}</svg>`;
+}
+function lookCard(){
+  const tr=TRACKS.find(t=>t.k===draft.track),base=tr?tr.age:35;
+  const age=base;
+  const lk={gender:draft.gender,beard:draft.beard,skin:draft.skin,hair:draft.hair,hcol:draft.hcol,glasses:draft.glasses};
+  const lab='mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400';
+  const seg=(k,v,on,txt)=>`<button data-look="${k}:${v}" class="rounded-lg py-2 text-xs font-bold transition active:scale-95 ${on?'bg-white text-black':'bg-black/30 text-neutral-200'}">${txt}</button>`;
+  return `<div class="${CARD} mt-4">
+    <div class="flex items-center justify-between"><h3 class="text-sm font-semibold">Seu personagem</h3><span class="text-[11px] text-neutral-400">Ele envelhece com você</span></div>
+    <div class="mt-3 flex flex-col items-center">
+      <div class="h-32 w-32 overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-[#3a3a41] to-[#26262b]">${avatarSvg(lk,age,tr?(tr.k==='exe'?'exe1':tr.k==='leg'?'leg0':'jud'):'none')}</div>
+      <div class="mt-1 text-[11px] text-neutral-400">Prévia aos ${age} anos</div>
+    </div>
+    <div class="mt-3 space-y-3">
+      <div><div class="${lab}">Gênero</div><div class="grid grid-cols-2 gap-2">${seg('gender','f',draft.gender==='f','Feminino')}${seg('gender','m',draft.gender==='m','Masculino')}</div></div>
+      <div><div class="${lab}">Tom de pele</div><div class="flex flex-wrap gap-2">${SKINS.map((c,i)=>`<button data-look="skin:${i}" aria-label="Tom de pele ${i+1}" class="h-8 w-8 rounded-full border-2 transition active:scale-90 ${draft.skin===i?'border-white':'border-transparent'}" style="background:${c}"></button>`).join('')}</div></div>
+      <div><div class="${lab}">Cabelo</div><div class="grid grid-cols-3 gap-2">${HAIRS[draft.gender].map(h=>seg('hair',h[0],draft.hair===h[0],h[1])).join('')}</div></div>
+      ${draft.gender==='m'?`<div><div class="${lab}">Barba</div><div class="grid grid-cols-3 gap-2">${[['none','Sem'],['barba','Barba'],['bigode','Bigode']].map(b=>seg('beard',b[0],draft.beard===b[0],b[1])).join('')}</div></div>`:''}
+      ${draft.hair!=='careca'?`<div><div class="${lab}">Cor do cabelo</div><div class="flex flex-wrap gap-2">${HCOLS.map((c,i)=>`<button data-look="hcol:${i}" aria-label="${c[0]}" class="h-8 w-8 rounded-full border-2 transition active:scale-90 ${draft.hcol===i?'border-white':'border-transparent'}" style="background:${c[1]}"></button>`).join('')}</div></div>`:''}
+      <div><div class="${lab}">Óculos</div><div class="grid grid-cols-2 gap-2">${seg('glasses',0,!draft.glasses,'Sem')}${seg('glasses',1,draft.glasses,'Com')}</div></div>
+      <div><div class="flex items-center justify-between"><div class="${lab}">Partido de preferência</div><span data-pinfo="1" role="button" aria-label="Ideais dos partidos" class="grid h-6 w-6 place-items-center rounded-full border border-white/30 bg-white/10 text-xs font-extrabold italic">i</span></div>
+        <div class="mt-1 grid grid-cols-2 gap-2">${Object.keys(PARTIES).map(k=>seg('party',k,draft.party===k,PARTIES[k].em+' '+PARTIES[k].n)).join('')}</div>
+        <p class="mt-1.5 text-[11px] leading-snug text-neutral-400">${draft.track==='jud'?'Como magistrado, você não terá partido: esta escolha só valerá se você entrar na política partidária.':draft.track?`Você começará filiado ao ${PARTIES[draft.party].n}.`:'Quem seguir carreira partidária começa filiado ao partido escolhido.'}</p></div>
+    </div>
+  </div>`;
+}
+
+/* ===================== TELA 1: CRIAÇÃO ===================== */
+function renderCreate(){
+  busy=false;st=null;
+  app.innerHTML=`
+  <div class="fade-in">
+    <div class="pb-5 pt-2 text-center">
+      <div class="triade-mark" aria-hidden="true"><span>🏛️</span><span>⚖️</span><span>🏢</span></div>
+      <h1 class="mt-2 text-2xl font-extrabold">Tríade</h1>
+      <p class="mt-1 text-sm text-neutral-400">Simulador educacional dos Três Poderes</p>
+    </div>
+    <div class="${CARD} space-y-4">
+      <div>
+        <label for="inName" class="text-sm font-semibold">Seu nome</label>
+        <input id="inName" maxlength="24" autocomplete="off" value="${esc(draft.name)}" placeholder="Ex.: Maria Silva"
+          class="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-base outline-none focus:border-emerald-400">
+      </div>
+      <div>
+        <label class="text-sm font-semibold">Estado de origem</label>
+        <button id="btnUf" type="button" class="mt-1 flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-base transition active:scale-[.99]">
+          ${draft.uf?`${flagBox(draft.uf)}<span class="flex-1">${UFS.find(u=>u[0]===draft.uf)[1]} <span class="text-neutral-400">(${draft.uf})</span></span>`:'<span class="flex-1 text-neutral-400">Selecione o estado…</span>'}
+          <span class="text-neutral-400">▾</span>
+        </button>
+      </div>
+    </div>
+    ${lookCard()}
+    <h2 class="mb-2 mt-5 text-xs font-bold uppercase tracking-wider text-neutral-400">Escolha sua trilha inicial</h2>
+    <div class="space-y-3">
+      ${TRACKS.map(t=>{const pw=P[t.k],sel=draft.track===t.k;
+        return `<button data-track="${t.k}" class="w-full rounded-3xl border p-4 text-left transition active:scale-[.98] ${sel?pw.bd+' '+pw.soft+' ring-2 ring-white/40':'border-white/10 bg-[#2c2c31] hover:bg-[#34343a]'}">
+          <div class="flex items-center gap-3">
+            <div class="text-3xl">${pw.em}</div>
+            <div class="flex-1">
+              <div class="font-bold ${sel?pw.txt:''}">${t.t}</div>
+              <div class="mt-0.5 text-xs font-semibold text-neutral-400">Começa aos ${t.age} anos</div>
+            </div>
+            <span data-tinfo="1" role="button" aria-label="Sobre o cargo" class="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-white/30 bg-white/10 text-xs font-extrabold italic transition active:scale-90">i</span><div class="text-xl">${sel?'✅':'⚪'}</div>
+          </div>
+          <p class="mt-2 text-sm text-neutral-300">${t.d}</p>
+        </button>`;}).join('')}
+    </div>
+    <p id="err" class="mt-3 min-h-[1.25rem] text-sm text-rose-400"></p>
+    <button id="btnStart" class="mt-1 w-full rounded-2xl bg-emerald-500 py-4 text-lg font-extrabold text-black shadow-lg transition active:scale-95">Começar jornada ▶</button>
+    <p class="mt-4 pb-4 text-center text-xs text-neutral-500">Os dilemas são inspirados em temas reais do debate público brasileiro. As consequências são uma simulação simplificada.</p>
+  </div>`;
+  $('#inName').addEventListener('input',e=>draft.name=e.target.value);
+  $('#btnUf').addEventListener('click',pickUf);
+  app.querySelectorAll('[data-track]').forEach(b=>b.addEventListener('click',ev=>{
+    const k=b.dataset.track;
+    if(ev.target.closest('[data-tinfo]'))return showCargoInfo(k,k==='exe'?1:0,()=>renderCreate());
+    draft.track=k;renderCreate();
+  }));
+  app.querySelectorAll('[data-pinfo]').forEach(b=>b.addEventListener('click',()=>showPartyInfo(()=>renderCreate())));
+  app.querySelectorAll('[data-look]').forEach(b=>b.addEventListener('click',()=>{
+    const [k,v]=b.dataset.look.split(':');
+    draft[k]=(k==='skin'||k==='hcol'||k==='prev')?+v:(k==='glasses'?v==='1':v);
+    if(k==='gender'){draft.hair=HAIRS[draft.gender][0][0];if(draft.gender==='f')draft.beard='none';}
+    renderCreate();
+  }));
+  $('#btnStart').addEventListener('click',()=>{
+    const err=$('#err');let msg='';
+    if(!draft.name.trim())msg='Digite seu nome para começar.';
+    else if(!draft.uf)msg='Escolha seu estado de origem.';
+    else if(!draft.track)msg='Escolha uma trilha inicial.';
+    if(msg){err.textContent=msg;err.classList.remove('shake');void err.offsetWidth;err.classList.add('shake');return;}
+    startGame();busy=true;refreshDash();showComic('posse',st.power,st.rank);showCargoInfo(st.power,st.rank,()=>{busy=false;refreshDash();},true);
+  });
+}
+
+function startGame(){
+  const tr=TRACKS.find(t=>t.k===draft.track),uf=UFS.find(u=>u[0]===draft.uf);
+  st={name:draft.name.trim(),uf:uf[0],ufName:uf[1],startAge:tr.age,age:tr.age,power:tr.k,rank:tr.k==='exe'?1:0,
+    pr:tr.s.pr,ap:tr.s.ap,es:tr.s.es,idh:0.760,sj:50,startIdh:0.760,
+    look:{gender:draft.gender,beard:draft.beard,skin:draft.skin,hair:draft.hair,hcol:draft.hcol,glasses:draft.glasses},risk:10,lean:0,party:draft.party||'PP',filiado:tr.k!=='jud',sinceElection:0,procs:0,scandals:0,partyPath:[],lastQuick:null,al:initAl(draft.party||'PP'),fbYear:Y0,cnt:{},terms:1,termEnd:Y0+4,usedQ:[],evN:0,evTotal:3,sliceLeft:0,queue:[],year:Y0,startYear:Y0,lastYears:2,yearsPower:0,sinceOffer:0,cycleLen:2,yearsBy:{jud:0,leg:0,exe:0},path:[],hist:[],log:[],used:{jud:[],leg:[],exe:[]},over:false,curEv:null};
+  const intro={
+    jud:`Aos ${tr.age} anos, você passou em um concurso super concorrido e tomou posse como ${gn('Juiz Federal')} em ${uf[1]}.`,
+    leg:`Aos ${tr.age} anos, você foi ${st.look.gender==='f'?'eleita':'eleito'} ${gn('Deputado Federal')} por ${uf[1]}.`,
+    exe:`Aos ${tr.age} anos, você assumiu o governo de ${uf[1]}, de olho na Presidência da República.`}[tr.k];
+  if(st.filiado)st.partyPath.push(st.party);logAdd(intro+(st.filiado?(st.look.gender==='f'?' Filiada ao ':' Filiado ao ')+PARTIES[st.party].n+'.':' Como magistrado, você não pode ter partido.'));snap();
+  renderDash();
+}
+
+/* ===================== TELA 2: DASHBOARD ===================== */
+function barRow(id,label,hint,mark){
+  return `<div title="${hint||''}">
+    <div class="flex items-baseline justify-between text-[13px]"><span class="font-medium text-neutral-200">${label}</span><span id="v-${id}" class="tabular-nums text-neutral-400">0%</span></div>
+    <div class="relative mt-1 h-2 overflow-hidden rounded-full bg-white/10"><div id="b-${id}" class="bar-fill h-full rounded-full" style="width:0%"></div>${mark?`<div class="absolute inset-y-0 w-0.5 bg-rose-400/90" style="left:${mark}%"></div>`:''}</div>
+  </div>`;
+}
+function renderDash(){
+  app.innerHTML=`
+  <div class="fade-in space-y-3">
+    <div id="hdr" class="relative overflow-hidden ${CARD}"></div>
+    <div class="${CARD} space-y-3">
+      ${barRow('pr','Prestígio','Reputação técnica e ética. Abaixo da linha vermelha: risco de processo',20)}
+      ${barRow('ap','Apoio Popular','Aprovação dos cidadãos. Abaixo da linha: eleição quase perdida',25)}
+      ${barRow('es','Estabilidade Política','Relação com os outros Poderes. Abaixo da linha: cassação ou impeachment',20)}
+      ${barRow('rk','Risco de Escândalo','Chance de vazamento, investigação e processo')}
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="${CARD}"><div class="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">IDH do Brasil</div><div id="idhVal" class="mt-1 text-2xl font-extrabold tabular-nums">0,760</div><div id="idhDelta" class="text-[11px] font-semibold"></div><div class="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div id="b-idh" class="bar-fill h-full rounded-full" style="width:0%"></div></div></div>
+      <div class="${CARD}"><div class="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">Segurança jurídica e orçamento</div><div id="v-sj" class="mt-1 text-2xl font-extrabold tabular-nums">50%</div><div class="mt-[22px] h-1.5 overflow-hidden rounded-full bg-white/10"><div id="b-sj" class="bar-fill h-full rounded-full" style="width:0%"></div></div></div>
+    </div>
+    <div class="${CARD}">
+      <div class="grid grid-cols-2 gap-2">${[2,4].map(n=>`<button data-c="${n}" class="rounded-xl py-2.5 text-sm font-bold transition active:scale-95">${n} anos</button>`).join('')}</div>
+      <p class="mt-2 text-center text-xs text-neutral-400">3 eventos a cada 2 anos</p>
+      <button id="advance" class="mt-3 w-full rounded-2xl bg-emerald-500 py-4 text-lg font-extrabold text-black transition active:scale-95 disabled:opacity-50">Avançar Próximo Ciclo ▶</button>
+      <button id="resign" class="mt-2 w-full rounded-2xl py-2.5 text-sm font-semibold text-rose-300 ring-1 ring-rose-400/30 transition active:scale-95 disabled:opacity-40">Renunciar ao cargo</button>
+    </div>
+    <details class="${CARD}"><summary class="cursor-pointer text-sm font-semibold text-neutral-300">Diário de carreira</summary><ul id="log" class="mt-3 max-h-60 space-y-2 overflow-y-auto pr-1"></ul></details>
+  </div>`;
+  app.querySelectorAll('[data-c]').forEach(b=>b.addEventListener('click',()=>{st.cycleLen=+b.dataset.c;refreshDash();}));
+  $('#advance').addEventListener('click',advance);
+  $('#resign').addEventListener('click',resign);
+  refreshDash();
+}
+function refreshDash(){
+  if(!$('#hdr'))return;
+  const pw=P[st.power],pct=clamp((st.age-st.startAge)/(RETIRE-st.startAge)*100);
+  $('#hdr').innerHTML=`
+    <div class="flex items-center gap-3">
+      <div class="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border ${pw.soft} ${pw.bd}">${avatarSvg(st.look,st.age,st.power)}<span class="absolute bottom-0 right-0 rounded-tl-lg bg-black/60 px-1 text-xs">${pw.em}</span></div>
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-lg font-bold">${esc(st.name)}</div>
+        <div class="text-sm text-neutral-300">${flagBox(st.uf,'h-3.5 w-5 align-[-2px]')} ${esc(st.ufName)} · <span class="font-semibold ${pw.txt}">${cargo()}</span> <button id="infoBtn" aria-label="Sobre o cargo" class="ml-1 inline-grid h-5 w-5 place-items-center rounded-full border border-white/30 bg-white/10 align-middle text-[11px] font-extrabold italic leading-none transition active:scale-90">i</button></div>
+      </div>
+      <div class="text-right"><div class="text-[11px] font-semibold uppercase text-neutral-400">Idade</div><div class="text-3xl font-extrabold leading-none tabular-nums">${st.age}</div><div class="mt-1 text-[11px] font-bold tabular-nums text-neutral-400">${st.year}</div></div>
+    </div>
+    <div class="mt-3 flex items-center justify-between text-xs">
+      <span class="rounded-full border px-2.5 py-1 font-semibold ${pw.soft} ${pw.txt} ${pw.bd}">${pw.n}</span><span class="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 font-semibold text-neutral-200" id="partyBtn" role="button">${st.filiado?PARTIES[st.party].em+' '+PARTIES[st.party].sig:'⚖️ Sem partido'}<span class="ml-1 opacity-60">ⓘ</span></span>
+      <span class="text-neutral-400">${st.yearsPower} anos no poder</span>
+    </div>
+    <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-black/40"><div class="h-full rounded-full bg-neutral-300" style="width:${pct}%"></div></div>
+    <div class="mt-1 flex justify-between text-[11px] text-neutral-500"><span>${st.startAge} anos</span><span>Aposentadoria: ${RETIRE}</span></div>`;
+  const hd=$('#hdr'),wrapC=document.createElement('div');wrapC.className='relative';
+  while(hd.firstChild)wrapC.appendChild(hd.firstChild);
+  hd.innerHTML=`<div class="absolute inset-0">${bannerSvg(bannerKindFor(st.power,st.rank))}</div><div class="absolute inset-0" style="background:linear-gradient(180deg,rgba(18,18,18,.38) 0%,rgba(18,18,18,.72) 62%,rgba(18,18,18,.86) 100%)"></div>`;
+  hd.appendChild(wrapC);
+  const infoB=$('#infoBtn');if(infoB)infoB.onclick=()=>showCargoInfo(st.power,st.rank);
+  const pB=$('#partyBtn');if(pB)pB.onclick=()=>showPartyInfo();
+  for(const k of ['pr','ap','es','sj']){
+    const v=clamp(st[k]),b=$('#b-'+k);
+    b.style.width=v+'%';b.style.backgroundColor=colorOf(v);
+    $('#v-'+k).textContent=Math.round(v)+'%'+(v<25?' ⚠️':'');
+  }
+  const rk=clamp(st.risk),rb=$('#b-rk');rb.style.width=rk+'%';rb.style.backgroundColor=colorOf(100-rk);$('#v-rk').textContent=Math.round(rk)+'%'+(rk>=70?' ⚠️':'');
+  const ip=clamp((st.idh-0.5)/0.5*100),ib=$('#b-idh');
+  ib.style.width=ip+'%';ib.style.backgroundColor='#38bdf8';
+  $('#idhVal').textContent=fmtIdh(st.idh);
+  const dl=st.idh-st.startIdh,de=$('#idhDelta');
+  de.textContent=(dl>=0?'▲ +':'▼ ')+fmtIdh(dl).replace('-','−')+' no total';
+  de.className='text-[11px] font-semibold '+(dl>=0?'text-emerald-400':'text-rose-400');
+  $('#log').innerHTML=st.log.slice(0,14).map(l=>`<li class="rounded-xl bg-black/25 px-3 py-2 text-sm"><span class="mr-1 font-bold text-neutral-400">${l.year} · ${l.age} anos</span><span class="text-neutral-200">${esc(l.text)}</span></li>`).join('');
+  app.querySelectorAll('[data-c]').forEach(b=>{
+    const on=+b.dataset.c===st.cycleLen;
+    b.className='rounded-xl py-2.5 text-sm font-bold transition active:scale-95 '+(on?'bg-white text-black':'bg-black/30 text-neutral-200');
+  });
+  $('#advance').disabled=busy||st.over;
+  const rsb=$('#resign');if(rsb){rsb.disabled=busy||st.over;rsb.textContent=st.power==='jud'?'Aposentar-se antecipadamente':'Renunciar ao cargo';}
+}
+function logAdd(text){st.log.unshift({age:st.age,year:st.year,text});}
+function snap(){st.hist.push({age:st.age,pr:st.pr,ap:st.ap,es:st.es,idh:st.idh,sj:st.sj});}
+
+/* ===================== MECÂNICA ===================== */
+function addYears(y){
+  const c=cargo(),last=st.path[st.path.length-1];
+  if(last&&last.cargo===c)last.years+=y;else st.path.push({cargo:c,power:st.power,years:y});
+  st.yearsBy[st.power]+=y;st.yearsPower+=y;st.sinceOffer+=y;st.sinceElection+=y;st.age+=y;st.year+=y;
+}
+function drift(y){
+  for(let i=0;i<y;i++){
+    st.ap+=(45-st.ap)*0.04;
+    st.es+=(50-st.es)*0.04;
+    st.sj+=(45-st.sj)*0.03;
+    st.pr-=0.35;
+    st.idh+=0.0004+(st.sj-50)*0.00002+(st.pr-50)*0.00001;
+  }
+  st.ap=clamp(st.ap);st.es=clamp(st.es);st.sj=clamp(st.sj);st.pr=clamp(st.pr);st.idh=clamp(st.idh,0.4,0.97);st.risk=clamp(st.risk-y*1.5);
+}
+function applyEffects(e,m){
+  const d=scaleFx(e,m);
+  st.pr=clamp(st.pr+d[0]);st.ap=clamp(st.ap+d[1]);st.es=clamp(st.es+d[2]);
+  st.idh=clamp(st.idh+d[3],0.4,0.97);st.sj=clamp(st.sj+d[4]);st.risk=clamp(st.risk+d[5]);
+  return d;
+}
+function checkOver(){
+  if(st.pr<=0)return 'pr';
+  if(st.es<=0)return 'es';
+  if(st.ap<=0&&st.power!=='jud')return 'ap';
+  return null;
+}
+function pickEvent(){
+  const pool=EVENTS[st.power],used=st.used[st.power];
+  let av=pool.map((_,i)=>i).filter(i=>!used.includes(i));
+  if(!av.length){used.length=0;av=pool.map((_,i)=>i);}
+  const i=rnd(av);used.push(i);return pool[i];
+}
+
+/* ---------- Modal ---------- */
+function openModal(inner){
+  modalEl.innerHTML=`<div class="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center">
+    <div id="panel" class="fade-in w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-[#2c2c31] p-5 sm:rounded-3xl" style="max-height:92dvh;padding-bottom:calc(1.25rem + env(safe-area-inset-bottom,0px))">${inner}</div></div>`;
+}
+function closeModal(){modalEl.innerHTML='';}
+function chips(d){
+  const names=['Prestígio','Apoio Popular','Estabilidade','IDH','Seg. Jurídica/Orç.','Risco de escândalo'];
+  return d.map((v,i)=>{
+    if(!v)return '';
+    const pos=i===5?v<0:v>0,up=v>0;
+    const txt=i===3?(up?'+':'−')+Math.abs(v).toFixed(3).replace('.',','):(up?'+':'−')+Math.abs(v)+'%';
+    return `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${pos?'bg-emerald-400/15 text-emerald-300':'bg-rose-400/15 text-rose-300'}">${names[i]} ${txt}</span>`;
+  }).join('');
+}
+const preview=(e,m)=>scaleFx(e,m);
+
+/* ---------- Evento / dilema ---------- */
+function showEvent(ev,years){
+  const m=1,pw=P[st.power];
+  st.curEv={ev,m};
+  openModal(`
+    <div class="text-xs font-bold uppercase tracking-wider ${pw.txt}">${st.year} · ${cargo()} · evento ${st.evN||1}/${st.evTotal||3}</div>
+    <h2 class="mt-1 text-xl font-extrabold leading-tight">${ev.t}</h2>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-300">${ev.d}</p>
+    <div class="mt-4 space-y-3">
+      ${ev.o.map((o,i)=>`<button data-opt="${i}" class="w-full rounded-2xl border border-white/10 bg-[#3a3a41] p-3 text-left transition hover:bg-[#44444c] active:scale-[.98]">
+        <div class="flex gap-3"><div class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-sm font-extrabold">${'ABC'[i]}</div><div class="text-sm font-semibold leading-snug">${o.l}</div></div>
+        </button>`).join('')}
+    </div>`);
+  modalEl.querySelectorAll('[data-opt]').forEach(b=>b.addEventListener('click',()=>pick(+b.dataset.opt)));
+}
+function pick(i){
+  const {ev,m}=st.curEv,o=ev.o[i];
+  const d=applyEffects(o.e,m);st.lean=clamp(st.lean+leanOf(o.e),-60,60);updateAlign(o.e);
+  logAdd(`${ev.t}: ${o.l}`);headlineIf({title:ev.t,opt:o.l,d});
+  refreshDash();
+  openModal(`
+    <div class="text-xs font-bold uppercase tracking-wider text-neutral-400">Resultado da sua decisão</div>
+    <h2 class="mt-1 text-lg font-extrabold leading-tight">${o.l}</h2>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-200">${o.r}</p>
+    <div class="mt-3 flex flex-wrap gap-1.5">${chips(d)}</div>
+    <div class="mt-4 rounded-2xl border border-sky-400/30 bg-sky-400/10 p-3 text-sm text-sky-100"><b>Você sabia?</b> ${ev.n}</div>
+    <button id="next" class="mt-4 w-full rounded-2xl bg-emerald-500 py-3.5 text-base font-extrabold text-black transition active:scale-95">Continuar ▶</button>`);
+  $('#next').addEventListener('click',()=>{closeModal();afterEvent();});
+}
+
+/* ===================== PARTIDOS · QUICK EVENTS · ELEIÇÃO · PROCESSO ===================== */
+const PARTIES={
+  PP:{sig:'PP',n:'Partido Progressista',em:'🌱',camp:'pop',b:[0,6,-4,3,0,0]},
+  PS:{sig:'PS',n:'Partido Socialista',em:'🌹',camp:'pop',b:[-2,8,-6,2,-2,0]},
+  PI:{sig:'PI',n:'Partido Industrialista',em:'🏭',camp:'est',b:[2,-4,6,0,4,0]},
+  PD:{sig:'PD',n:'Partido Democrático',em:'🕊️',camp:'est',b:[5,-4,6,0,1,0]}
+};
+const leanOf=e=>(e[1]+e[3])-(e[0]+e[2]);
+const ATO={jud:'uma sentença favorável',leg:'o seu voto em um projeto de lei',exe:'a assinatura de um contrato público'};
+const fillAto=t=>t.replace('{ato}',ATO[st.power]);
+const KIND={
+  sec:{lab:'🕵️ OPORTUNIDADE SECRETA',cls:'border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-200'},
+  alert:{lab:'🚨 ALERTA URGENTE',cls:'border-rose-400/60 bg-rose-500/15 text-rose-200'},
+  media:{lab:'📰 PLANTÃO · REPORTAGEM BOMBÁSTICA',cls:'border-amber-400/60 bg-amber-500/15 text-amber-200'},
+  social:{lab:'📱 ALERTA NAS REDES SOCIAIS',cls:'border-sky-400/60 bg-sky-500/15 text-sky-200'},
+  part:{lab:'🎤 PARTICIPAÇÃO POPULAR',cls:'border-emerald-400/60 bg-emerald-500/15 text-emerald-200'}
+};
+/* efeitos: [prestígio, apoio, estabilidade, IDH(milésimos), seg.jurídica, RISCO DE ESCÂNDALO] */
+const QUICK=[
+{id:'maleta',k:'sec',p:['jud','leg','exe'],t:'A maleta',d:'Um empresário influente marca um encontro discreto. Ele oferece R$ 2 milhões em dinheiro vivo em troca de {ato}. Ninguém está vendo e você precisa responder agora.',n:'Corrupção passiva é crime: solicitar ou receber vantagem indevida por causa do cargo (art. 317 do Código Penal).',o:[
+ {l:'Aceitar o dinheiro',r:'O dinheiro abriu portas: aliados e recursos apareceram. Mas agora existe um rastro, e o empresário guarda o seu segredo.',e:[-6,10,8,0,0,35]},
+ {l:'Recusar e encerrar a conversa',r:'Você saiu de cabeça erguida. O empresário passou a apoiar seus adversários.',e:[4,-2,-6,0,0,-5]},
+ {l:'Fingir que aceita e acionar a polícia',r:'A operação prendeu o empresário e você virou símbolo de integridade, mas contrariou aliados que também tinham negócios com ele.',e:[10,10,-12,0,3,-12]}]},
+{id:'caixa2',k:'sec',p:['leg','exe'],t:'Dinheiro por fora',d:'Seu coordenador de campanha oferece uma doação milionária que não precisa ser declarada: "todo mundo faz". Sem ela, a sua campanha perde fôlego.',n:'Caixa dois é o uso de dinheiro não declarado à Justiça Eleitoral e pode levar à cassação do mandato.',o:[
+ {l:'Aceitar o caixa dois',r:'A campanha ganhou estrutura e visibilidade, mas o dinheiro não declarado virou uma bomba-relógio.',e:[-4,14,6,0,0,30]},
+ {l:'Exigir que tudo seja declarado',r:'Você manteve a campanha limpa, mas o doador se afastou e a estrutura encolheu.',e:[6,-6,-2,0,0,-5]},
+ {l:'Apostar em doações de pequenos apoiadores',r:'A mobilização foi mais lenta, mas ganhou ar de campanha popular.',e:[4,2,-6,0,0,-4]}]},
+{id:'tentativa',k:'sec',p:['jud'],t:'Um favorzinho de amigo',d:'Um antigo colega, hoje advogado de peso, pede que você "dê uma olhada com carinho" em um processo. Em troca, promete viagens e contratos para o seu círculo.',n:'Magistrados devem agir com imparcialidade: o Código de Ética da Magistratura veda favorecimentos.',o:[
+ {l:'Aceitar e dar uma força',r:'O amigo ficou muito agradecido, mas as mensagens trocadas podem voltar para te assombrar.',e:[-6,0,8,0,-4,30]},
+ {l:'Recusar e declarar suspeição',r:'Você se afastou do caso e ganhou respeito entre os colegas, ainda que tenha perdido um aliado.',e:[8,2,-4,0,4,-5]},
+ {l:'Denunciar a tentativa à corregedoria',r:'Seu gesto foi elogiado, mas parte do meio jurídico passou a te ver como alguém imprevisível.',e:[10,4,-8,0,4,-10]}]},
+{id:'aliado',k:'alert',p:['jud','leg','exe'],t:'Esquema no seu grupo',d:'Um documento cai nas suas mãos: um aliado de peso desvia verbas públicas por meio de contratos fantasmas. A imprensa ainda não sabe de nada.',n:'Qualquer cidadão pode denunciar irregularidades ao Ministério Público: denunciar corrupção é um dever cívico, mas pode ter custo político.',o:[
+ {l:'Denunciar publicamente',r:'Você virou voz contra a corrupção, mas perdeu aliados e passou a ser visto como traidor pelo grupo.',e:[8,12,-14,1,4,-5]},
+ {l:'Pressionar nos bastidores para devolverem o dinheiro',r:'Parte do dinheiro voltou aos cofres, mas o caso ficou escondido e pode voltar a assombrar você.',e:[2,0,4,0,3,8]},
+ {l:'Ficar calado',r:'Você protegeu a aliança, mas agora sabe de algo e não disse nada. Se vazar, vai ser acusado de omissão.',e:[-8,-4,8,0,-4,18]}]},
+{id:'dossie',k:'alert',p:['jud','leg','exe'],t:'Dossiê contra o rival',d:'Um assessor entrega um dossiê que implica o seu maior adversário em corrupção. Parte dos documentos parece frágil, mas o momento seria perfeito.',n:'Acusar alguém sem provas pode configurar calúnia ou denunciação caluniosa, que são crimes.',o:[
+ {l:'Vazar para a imprensa agora',r:'O rival foi atingido em cheio, mas parte dos documentos se mostrou falsa e o caso virou um tiro no pé.',e:[-4,10,-4,0,0,10]},
+ {l:'Entregar ao Ministério Público e esperar',r:'Mais lento, mas legítimo. O caso seguiu pelos trâmites e você ficou fora da polêmica.',e:[8,3,-2,1,3,0]},
+ {l:'Guardar o dossiê para o momento certo',r:'Você ganhou poder de barganha, mas o assessor sabe do dossiê e pode vazá-lo por conta própria.',e:[0,0,4,0,0,12]}]},
+{id:'media',k:'media',p:['jud','leg','exe'],t:'Reportagem bombástica',d:'Um grande jornal publica em poucas horas uma reportagem sobre seus gastos, viagens e contatos suspeitos. A redação pede uma resposta oficial antes do fechamento.',n:'A liberdade de imprensa é garantida pela Constituição (art. 220), e o cidadão tem direito à informação.',o:[
+ {l:'Responder com transparência: divulgar agendas e gastos',r:'Parte do estrago foi contido. A transparência desarmou boa parte da crise, mas revelou alguns constrangimentos.',e:[6,2,-4,0,2,-12]},
+ {l:'Negar tudo e atacar a imprensa',deny:true,r:'Você mobilizou sua base, mas perdeu credibilidade entre quem acompanha os fatos.',e:[-6,6,4,0,0,10]},
+ {l:'Processar o jornal e pedir sigilo judicial',r:'O processo gerou ruído sobre censura e a matéria viralizou ainda mais.',e:[-8,-6,6,0,-3,5]}]},
+{id:'atoContra',k:'alert',p:['leg'],t:'Ato nas ruas contra o governo',d:'Milhares de pessoas ocupam a avenida central contra o governo. Convidam você para subir no carro de som e falar. As câmeras de todo o país estão ali.',n:'A Constituição garante o direito de reunião pacífica (art. 5º, XVI) e a liberdade de expressão.',o:[
+ {l:'Discursar contra o governo',r:'Você incendiou a multidão e subiu nas pesquisas, mas o governo e seus aliados passaram a tratá-lo como inimigo.',e:[0,12,-12,0,-2,4]},
+ {l:'Discursar defendendo o governo',r:'Foi vaiado, mas ganhou o respeito dos aliados e da base governista.',e:[-2,-10,10,0,0,0]},
+ {l:'Não ir e emitir uma nota moderada',r:'Você evitou o desgaste, mas parte da população sentiu a sua ausência.',e:[2,-2,2,0,0,0]}]},
+{id:'atoContraExe',k:'alert',p:['exe'],t:'Ato nas ruas contra o seu governo',d:'Uma multidão toma a avenida central contra o seu governo. Auxiliares divergem sobre como reagir diante das câmeras de todo o país.',n:'A polícia deve garantir o direito de manifestação pacífica, intervindo apenas contra violência e depredação.',o:[
+ {l:'Ir pessoalmente dialogar com os manifestantes',r:'O gesto desarmou os ânimos e rendeu pontos de simpatia, mas expôs você a críticas diretas.',e:[6,8,-6,0,0,4]},
+ {l:'Mandar a polícia dispersar o ato',r:'A ordem foi cumprida, mas as imagens de repressão rodaram o país e o desgaste foi grande.',e:[-8,-12,8,0,0,8]},
+ {l:'Fazer um pronunciamento na TV',r:'Você manteve a postura, mas parte da população achou o discurso distante da realidade.',e:[0,-4,2,0,0,0]}]},
+{id:'atoFavor',k:'alert',p:['leg','exe'],t:'Ato em apoio ao governo',d:'Uma grande manifestação governista pede que você discurse. A plateia é fiel, mas os adversários já preparam críticas.',n:'Manifestações são parte da democracia, e líderes políticos escolhem se participam ou não.',o:[
+ {l:'Discursar em tom de campanha',r:'A base vibrou, mas a oposição acusou você de transformar o ato em palanque.',e:[-2,6,10,0,0,4]},
+ {l:'Defender reformas sem partidarismo',r:'O discurso sóbrio agradou um público mais amplo, ainda que menos entusiasmado.',e:[4,2,4,0,0,0]},
+ {l:'Não comparecer',r:'Você evitou o desgaste, mas aliados reclamaram da ausência.',e:[0,-4,-6,0,0,0]}]}
+];
+
+QUICK.push(
+{id:'nepotismo',k:'sec',p:['leg','exe'],t:'Um cargo para o primo',d:'A liderança do seu grupo pressiona você a nomear um parente de um aliado para um cargo comissionado bem pago. "É só um favorzinho", dizem.',n:'A Súmula Vinculante 13 do STF proíbe o nepotismo na administração pública.',o:[
+ {l:'Nomear o parente',r:'O aliado ficou agradecido e a base se acomodou, mas a nomeação não passou despercebida.',e:[-4,2,8,0,-2,15]},
+ {l:'Recusar educadamente',r:'Você manteve a regra, mas ficou com fama de difícil entre os aliados.',e:[3,0,-6,0,0,-3]},
+ {l:'Abrir uma seleção pública para a vaga',r:'O processo seletivo deu transparência, embora o aliado tenha reclamado.',e:[6,2,-3,0,2,-5]}]},
+{id:'jatinho',k:'sec',p:['jud','leg','exe'],t:'Carona no jatinho',d:'Um empresário oferece carona e hospedagem em um resort de luxo "só para conversar sobre o futuro do país". Tudo por conta dele.',n:'Presentes e vantagens oferecidos a agentes públicos podem configurar corrupção, e há regras sobre conflito de interesses.',o:[
+ {l:'Aceitar a viagem',r:'Foram dias agradáveis, mas fotos e registros do voo podem aparecer a qualquer momento.',e:[-3,3,6,0,0,20]},
+ {l:'Recusar o convite',r:'Você evitou o risco, e o empresário passou a tratá-lo com frieza.',e:[2,0,-3,0,0,-2]},
+ {l:'Pagar a própria passagem e se reunir em agenda pública',r:'A reunião ocorreu às claras, sem constrangimentos, embora com menos intimidade.',e:[5,1,-2,0,1,-3]}]},
+{id:'delacao',k:'alert',p:['jud','leg','exe'],t:'Delação premiada',d:'Um investigado fecha delação e cita o seu nome, ainda sem provas. Seus advogados pedem que você tome a iniciativa antes que a notícia vaze.',n:'A delação premiada precisa ser confirmada por provas: sozinha, ela não basta para condenar ninguém.',o:[
+ {l:'Apresentar-se espontaneamente ao Ministério Público',r:'A atitude surpreendeu, passou imagem de transparência e reduziu as suspeitas, mas desagradou aliados.',e:[4,-4,-6,0,0,-12]},
+ {l:'Desmentir publicamente e ameaçar processar',deny:true,r:'Você deu uma resposta firme, mas se as provas aparecerem, o desmentido vira munição contra você.',e:[-4,4,4,0,0,8]},
+ {l:'Sumir da imprensa até a poeira baixar',r:'O silêncio acalmou o noticiário por ora, mas deixou o assunto aberto.',e:[-2,-3,2,0,0,6]}]},
+{id:'audio',k:'media',p:['jud','leg','exe'],t:'Áudio vazado',d:'Um áudio seu conversando com aliados vaza nas redes. O contexto não está claro e a internet já tirou as próprias conclusões.',n:'Gravações podem ser usadas como prova quando obtidas de forma lícita, mas o contexto da conversa faz toda a diferença.',o:[
+ {l:'Divulgar o áudio completo',r:'A versão integral mostrou o contexto e esfriou a polêmica, mas revelou alguns trechos desagradáveis.',e:[5,2,-3,0,0,-8]},
+ {l:'Dizer que o áudio é falso, montagem ou IA',deny:true,r:'Parte da base acreditou na versão, mas perícias independentes podem desmentir você.',e:[-6,4,3,0,0,12]},
+ {l:'Pedir desculpas pelo tom e explicar o contexto',r:'O pedido de desculpas humanizou você, embora tenha custado alguma popularidade.',e:[2,-4,0,0,0,-4]}]},
+{id:'tragedia',k:'alert',p:['leg','exe'],t:'Tragédia climática',d:'Chuvas fortes deixam milhares de pessoas desabrigadas em uma cidade. A população cobra presença e ação imediata das autoridades.',n:'A Defesa Civil atua em conjunto com União, estados e municípios, e recursos emergenciais podem ser liberados com rapidez.',o:[
+ {l:'Ir ao local e liberar verba emergencial',r:'Sua presença foi vista como solidária e rendeu apoio, mas os cofres sentiram o impacto.',e:[4,10,-4,2,-6,0]},
+ {l:'Coordenar a ajuda de Brasília por videoconferência',r:'A resposta foi eficiente, mas parte da população criticou a ausência física.',e:[0,-4,2,1,-2,0]},
+ {l:'Culpar governos anteriores',r:'A estratégia agradou a base, mas ficou parecendo fuga de responsabilidade.',e:[-6,-4,4,0,0,2]}]},
+{id:'servidores',k:'alert',p:['exe'],t:'Greve geral de servidores',d:'Servidores federais cruzam os braços por reajuste e serviços essenciais são afetados. A pressão sobre você aumenta a cada hora.',n:'Servidores públicos têm direito de greve nos termos da lei, e negociações coletivas são comuns.',o:[
+ {l:'Conceder o reajuste pedido',r:'A greve acabou rápido e os servidores aplaudiram, mas as contas públicas ficaram mais apertadas.',e:[0,8,6,1,-10,0]},
+ {l:'Cortar o ponto dos grevistas',r:'A greve perdeu força, mas o clima com o funcionalismo azedou.',e:[-2,-8,2,-1,5,0]},
+ {l:'Negociar um reajuste parcelado',r:'O acordo saiu depois de rodadas de conversa, com algum desgaste para ambos os lados.',e:[4,2,0,1,-4,0]}]},
+{id:'fechar',k:'alert',p:['leg'],t:'Fechar questão',d:'A liderança do seu partido exige que você vote contra a sua consciência em um projeto polêmico. Quem desobedecer pode perder cargos e espaço.',n:'Líderes partidários orientam as bancadas, e o voto de cada parlamentar costuma ser aberto e registrado.',o:[
+ {l:'Obedecer à liderança',r:'Você garantiu seu espaço no partido, mas ficou com um voto difícil de explicar aos eleitores.',e:[-4,-4,8,0,0,0]},
+ {l:'Votar com a consciência',r:'Você foi aplaudido pela coerência, mas a direção do partido passou a olhá-lo com desconfiança.',e:[5,5,-8,0,0,0]},
+ {l:'Ausentar-se da votação',r:'Você evitou o conflito, mas ficou conhecido como quem se esconde nas horas difíceis.',e:[-4,-2,-2,0,0,0]}]},
+{id:'telefonema',k:'sec',p:['leg','exe'],t:'Telefonema ao juiz',d:'Um aliado pede que você ligue para um juiz amigo e "converse" sobre um processo que o atinge. Seria só uma ligação rápida.',n:'Tentar interferir em decisões judiciais pode configurar tráfico de influência ou obstrução de justiça.',o:[
+ {l:'Fazer a ligação',r:'O aliado ficou devendo um favor, mas existe agora um registro dessa conversa.',e:[-5,0,8,0,-4,25]},
+ {l:'Recusar o pedido',r:'Você preservou a imparcialidade das instituições, mas o aliado se ressentiu.',e:[3,0,-5,0,0,-3]},
+ {l:'Sugerir que ele procure um advogado',r:'Você saiu da situação com elegância, sem desagradar demais.',e:[2,0,-2,0,0,0]}]},
+{id:'boato',k:'media',p:['jud','leg','exe'],t:'Boato sobre você',d:'Um vídeo falso circula acusando você de um crime que não cometeu e já passa de 3 milhões de visualizações. O silêncio pode ser interpretado como culpa.',n:'Divulgar conteúdo falso para prejudicar alguém pode configurar crime contra a honra, e a Justiça pode determinar a remoção.',o:[
+ {l:'Pedir a remoção judicial e processar os autores',r:'O vídeo saiu do ar e a resposta foi vista como firme, embora parte do estrago já estivesse feito.',e:[3,-2,2,0,0,0]},
+ {l:'Gravar um vídeo mostrando provas',r:'A resposta direta ajudou a desmentir o boato e aproximou você do público.',e:[4,6,-2,0,0,-2]},
+ {l:'Ignorar e esperar passar',r:'O boato perdeu força aos poucos, mas deixou rastros na opinião pública.',e:[-5,-6,2,0,0,2]}]},
+{id:'fiscal',k:'sec',p:['leg','exe'],t:'A taxa do assessor',d:'Você descobre que um assessor de confiança cobra uma "taxa" de empresas para agilizar licenças e contratos. Ele sempre foi leal a você.',n:'Concussão e corrupção são crimes, e o caminho legal é afastar o suspeito e comunicar ao Ministério Público.',o:[
+ {l:'Demitir e comunicar ao Ministério Público',r:'Você agiu rápido e passou imagem de integridade, mas o assessor guarda mágoa e pode falar.',e:[8,4,-8,0,3,-8]},
+ {l:'Demitir sem alarde',r:'O problema sumiu do gabinete, mas o assunto não foi investigado de verdade.',e:[3,0,2,0,0,8]},
+ {l:'Fingir que não viu',r:'Você evitou o desconforto, mas agora é cúmplice por omissão.',e:[-8,-4,6,0,-4,20]}]},
+{id:'lobby',k:'sec',p:['jud','leg','exe'],t:'Jantar com o lobby',d:'Um grupo poderoso do setor privado convida você para um jantar reservado e sugere apoio financeiro para o seu projeto.',n:'Lobby é atividade legítima quando transparente. O problema surge quando há vantagem indevida em troca de decisões.',o:[
+ {l:'Ir e registrar a reunião na agenda pública',r:'Tudo às claras: você ouviu as demandas sem constrangimento, mas sem intimidade com o grupo.',e:[3,2,2,0,0,-2]},
+ {l:'Ir sem registrar o encontro',r:'O jantar rendeu apoio e contatos, mas a falta de registro pode virar problema.',e:[-3,4,8,0,0,15]},
+ {l:'Recusar o convite',r:'Você manteve a distância, mas perdeu um possível apoio.',e:[2,0,-4,0,0,0]}]},
+{id:'cpi',k:'alert',p:['leg','exe'],t:'Convocação para a CPI',d:'Você é convocado a depor numa CPI que apura irregularidades ligadas ao seu grupo. As câmeras estarão ligadas durante todo o depoimento.',n:'CPIs têm poderes de investigação próprios de autoridades judiciais, mas não podem condenar ninguém.',o:[
+ {l:'Comparecer e responder a tudo',r:'Você enfrentou as perguntas e saiu com a imagem de quem não tem nada a esconder, mas deu munição aos rivais.',e:[5,2,-4,0,0,-6]},
+ {l:'Ficar em silêncio, amparado por habeas corpus',r:'A estratégia jurídica foi segura, mas passou a impressão de quem tem o que esconder.',e:[-2,-4,2,0,0,4]},
+ {l:'Faltar e arriscar a condução coercitiva',r:'A ausência irritou a comissão e virou manchete negativa.',e:[-8,-6,-4,0,0,10]}]},
+{id:'influencer',k:'media',p:['jud','leg','exe'],t:'Convite viral',d:'Um influenciador com milhões de seguidores convida você para um vídeo de bastidores. Seus assessores veem a chance de falar com um público novo.',n:'A comunicação política migrou para as redes sociais e exige cuidado redobrado com a imagem pública.',o:[
+ {l:'Aceitar e entrar na brincadeira',r:'O vídeo viralizou e você ganhou simpatia, mas parte do público achou a postura pouco séria.',e:[-2,10,-2,0,0,2]},
+ {l:'Aceitar, mas falar das suas propostas',r:'O vídeo foi bem recebido por quem queria informação de verdade, com alcance menor.',e:[4,5,0,0,0,0]},
+ {l:'Recusar o convite',r:'Você preservou a sobriedade, mas perdeu uma vitrine importante.',e:[0,-3,0,0,0,0]}]},
+{id:'pesquisa',k:'media',p:['leg','exe'],t:'Pesquisa bombástica',d:'Uma pesquisa de opinião mostra uma queda brusca na sua aprovação. O marqueteiro propõe uma jogada de efeito para virar o jogo.',n:'Pesquisas de opinião têm margem de erro e não são previsões exatas. As eleitorais precisam ser registradas na Justiça Eleitoral.',o:[
+ {l:'Anunciar às pressas um programa popular',r:'O anúncio recuperou parte da aprovação, mas a pressa deixou o programa mal planejado e caro.',e:[-2,10,-4,2,-8,0]},
+ {l:'Contestar a metodologia da pesquisa',r:'Você mobilizou a base, mas parte do público achou a reação defensiva demais.',e:[-3,2,2,0,0,0]},
+ {l:'Manter a agenda e ignorar a pesquisa',r:'A aposta na coerência foi bem vista por parte da classe política, mas o desgaste continuou.',e:[3,-4,2,0,0,0]}]},
+{id:'ameaca',k:'alert',p:['jud'],t:'Ameaça anônima',d:'Você recebe mensagens ameaçadoras por causa de um julgamento polêmico. O caso mobiliza a opinião pública e a pressão aumenta.',n:'Magistrados ameaçados contam com proteção e segurança institucional, e ameaças a juízes são crime.',o:[
+ {l:'Pedir escolta e seguir com o julgamento',r:'A segurança foi reforçada e você manteve a firmeza, o que foi bem recebido.',e:[5,0,0,0,0,-2]},
+ {l:'Passar o caso para outro juiz',r:'Você saiu da linha de fogo, mas o gesto foi visto como recuo.',e:[-6,-2,2,0,0,0]},
+ {l:'Expor as ameaças publicamente',r:'A atitude gerou solidariedade, mas aumentou a tensão com os envolvidos no caso.',e:[3,6,-4,0,0,0]}]}
+);
+
+QUICK.push(
+/* ---------- fake news ---------- */
+{id:'fkRival',k:'social',p:['leg','exe'],t:'Print bombástico contra o rival',d:'Uma postagem viral mostra "prints" de que o seu maior rival fraudou uma licitação. A publicação favorece você, mas ninguém sabe se é verdadeira.',n:'Checar a fonte, a data e o contexto de uma publicação antes de compartilhar é a melhor defesa contra a desinformação.',o:[
+ {l:'Checar os dados com agências de checagem',tag:'check',r:'Os prints estavam adulterados. Você não caiu na armadilha e ainda ganhou crédito por desmentir o boato.',e:[6,2,-2,0,0,-4]},
+ {l:'Compartilhar sem checar',tag:'ign',r:'O post bombou a seu favor, mas logo especialistas provaram que era falso, e a bomba explodiu no seu colo.',e:[-8,8,4,0,0,12]},
+ {l:'Ignorar a postagem',tag:'ign',r:'Você ficou fora da polêmica, mas perdeu a chance de desmentir ou de aproveitar o debate.',e:[0,-1,0,0,0,0]}]},
+{id:'fkProjeto',k:'social',p:['leg','exe'],t:'Corrente no WhatsApp',d:'Uma corrente diz que o seu projeto vai "acabar com a aposentadoria". Já foi encaminhada milhares de vezes e a população está assustada.',n:'Mensagens em cadeia costumam usar medo e urgência para viralizar. Desconfiar e checar a fonte ajuda a frear a desinformação.',o:[
+ {l:'Checar os números e publicar um esclarecimento com fontes',tag:'check',r:'O esclarecimento com dados reduziu o pânico e mostrou transparência.',e:[5,4,0,0,2,0]},
+ {l:'Ignorar a corrente',tag:'ign',r:'O boato seguiu se espalhando e a rejeição ao seu projeto cresceu.',e:[-2,-8,0,0,0,0]},
+ {l:'Gravar um vídeo emocionado, sem apresentar dados',tag:'ign',r:'O vídeo comoveu parte do público, mas sem dados o boato não morreu.',e:[-3,3,0,0,0,0]}]},
+{id:'fkGrafico',k:'social',p:['leg','exe'],t:'O gráfico inflado',d:'Seu assessor quer divulgar um gráfico com dados exagerados sobre a sua gestão. A imagem está viralizando a seu favor.',n:'Gráficos podem enganar quando cortam o eixo, escondem a fonte ou exageram os números. Divulgar dados falsos prejudica a confiança pública.',o:[
+ {l:'Checar os dados e corrigir o gráfico',tag:'check',r:'A correção deu menos alcance, mas protegeu a sua credibilidade.',e:[4,-2,-2,0,0,-3]},
+ {l:'Deixar viralizar',tag:'ign',r:'O gráfico bombou, mas uma agência de checagem desmontou os números e a repercussão virou contra você.',e:[-6,8,0,0,0,10]},
+ {l:'Culpar o assessor',tag:'ign',r:'A demissão apaziguou parte da crítica, mas você foi acusado de se esconder atrás da equipe.',e:[-4,0,-4,0,0,4]}]},
+{id:'fkDeepfake',k:'social',p:['jud','leg','exe'],t:'Deepfake de um aliado',d:'Um vídeo mostra um aliado seu dizendo absurdos. A base pede que você o condene publicamente, mas algo no vídeo parece estranho.',n:'Deepfakes usam inteligência artificial para simular rostos e vozes. A perícia técnica ajuda a identificar manipulações.',o:[
+ {l:'Pedir uma perícia antes de se posicionar',tag:'check',r:'A perícia apontou a manipulação do vídeo. Você protegeu o aliado e saiu com fama de ponderado.',e:[5,2,2,0,0,-2]},
+ {l:'Condenar o aliado imediatamente',tag:'ign',r:'Você ganhou aplausos da multidão, mas o vídeo era falso e o aliado virou inimigo.',e:[-6,6,-8,0,0,4]},
+ {l:'Ignorar o assunto',tag:'ign',r:'O silêncio protegeu você do escândalo, mas deixou o aliado exposto.',e:[-2,-2,0,0,0,2]}]},
+{id:'fkVacina',k:'social',p:['leg','exe'],t:'Boato sobre vacina',d:'Circula o boato falso de que uma vacina causa efeitos graves. Os postos de saúde começam a esvaziar e a cobertura vacinal cai.',n:'As informações oficiais sobre vacinas são divulgadas pelo Ministério da Saúde e pela Anvisa. A vacinação é uma das ações de saúde pública mais eficazes.',o:[
+ {l:'Checar os dados com a Anvisa e esclarecer a população',tag:'check',r:'A campanha de esclarecimento recuperou a confiança e a procura pelos postos voltou a subir.',e:[6,4,0,3,2,0]},
+ {l:'Ignorar o boato',tag:'ign',r:'O boato se espalhou, a cobertura vacinal caiu e a saúde pública sofreu.',e:[-4,-3,0,-3,0,0]},
+ {l:'Usar o boato contra um adversário',tag:'ign',r:'A jogada prejudicou o adversário, mas colocou a saúde da população em risco e foi duramente criticada.',e:[-8,6,2,-4,-2,10]}]},
+{id:'fkDecisao',k:'social',p:['jud'],t:'Sua decisão distorcida',d:'Um perfil viral distorce uma decisão sua, dizendo que você soltou um criminoso perigoso. Os autos mostram exatamente o contrário.',n:'Decisões judiciais são, em regra, públicas e podem ser consultadas, e o Judiciário divulga notas oficiais para esclarecer casos de repercussão.',o:[
+ {l:'Checar os autos e divulgar uma nota técnica do tribunal',tag:'check',r:'A nota oficial desmentiu o boato com os documentos do processo.',e:[5,2,0,0,2,-2]},
+ {l:'Ignorar a postagem',tag:'ign',r:'O boato continuou circulando e a imagem do tribunal sofreu.',e:[-3,-6,0,0,0,0]},
+ {l:'Responder pessoalmente nas redes',tag:'ign',r:'A resposta pessoal foi vista como imprópria para um magistrado e ampliou a polêmica.',e:[-6,3,0,0,0,4]}]},
+/* ---------- participação popular ---------- */
+{id:'ptSaude',k:'part',p:['leg','exe'],t:'Audiência pública pela saúde',d:'Moradores pedem uma audiência pública para protestar contra o fechamento de um posto de saúde. O auditório está lotado e a imprensa vai cobrir.',n:'Audiências públicas permitem que o cidadão participe diretamente das decisões do poder público.',o:[
+ {l:'Comparecer pessoalmente e ouvir a comunidade',tag:'part',mood:'cheer',s:'Estou aqui para ouvir vocês. O posto não fecha sem uma solução!',r:'A presença foi muito bem recebida. Você saiu com compromissos concretos e a comunidade voltou a confiar em você.',e:[6,10,-2,3,-3,0]},
+ {l:'Mandar um assessor no seu lugar',tag:'nopart',mood:'boo',s:'Meu gabinete vai acompanhar o caso...',r:'A comunidade se sentiu ignorada e criticou a sua ausência.',e:[-2,-6,0,0,0,0]},
+ {l:'Recusar o convite por falta de agenda',tag:'nopart',mood:'boo',s:'Infelizmente não poderei comparecer.',r:'A recusa virou assunto nas redes e foi lida como descaso.',e:[-5,-8,2,0,0,0]}]},
+{id:'ptConselho',k:'part',p:['leg','exe'],t:'Conselho comunitário pede espaço',d:'Lideranças de vários bairros formam um conselho e pedem um canal permanente de diálogo com você. A reunião de apresentação acontece num ginásio cheio.',n:'Conselhos de políticas públicas são espaços onde sociedade e governo discutem juntos temas como saúde, educação e assistência social.',o:[
+ {l:'Criar um conselho consultivo permanente',tag:'part',mood:'cheer',s:'A partir de hoje, vocês têm uma cadeira cativa nas decisões!',r:'O conselho foi criado e virou referência de diálogo. Algumas decisões ficaram mais lentas.',e:[5,8,-4,3,-2,0]},
+ {l:'Receber a liderança em reunião fechada',mood:'calm',s:'Vamos conversar com calma, em reunião reservada.',r:'O diálogo foi cordial, mas ficou restrito a poucos.',e:[1,2,0,0,0,0]},
+ {l:'Adiar o encontro sem data',tag:'nopart',mood:'boo',s:'Voltamos a falar em breve...',r:'O adiamento irritou as lideranças e a mobilização cresceu.',e:[-3,-4,0,0,0,0]}]},
+{id:'ptOrcamento',k:'part',p:['leg','exe'],t:'Orçamento participativo',d:'Movimentos populares exigem votar diretamente parte do orçamento. A plateia da assembleia aguarda a sua resposta.',n:'No orçamento participativo, a população decide diretamente parte dos gastos públicos.',o:[
+ {l:'Abrir parte do orçamento para votação popular',tag:'part',mood:'cheer',s:'O dinheiro é de vocês, e a decisão também será!',r:'A população escolheu obras prioritárias e a gestão ganhou legitimidade, embora o planejamento tenha ficado mais complexo.',e:[4,10,-4,4,-4,0]},
+ {l:'Consultar apenas entidades parceiras',mood:'calm',s:'Vamos ouvir as entidades que já conhecemos.',r:'A consulta foi ágil, mas parte da população se sentiu excluída.',e:[0,2,2,0,0,0]},
+ {l:'Manter a decisão técnica',tag:'nopart',mood:'boo',s:'Orçamento é assunto para especialistas.',r:'Os técnicos aprovaram, mas os movimentos sociais saíram revoltados.',e:[2,-4,2,0,2,0]}]},
+{id:'ptAssembleia',k:'part',p:['leg','exe'],t:'Assembleia de bairro',d:'Você é convidado para falar numa assembleia de bairro lotada, com cartazes sobre transporte, moradia e emprego.',n:'Compromissos públicos ficam registrados e podem ser cobrados pelos eleitores.',o:[
+ {l:'Assumir compromissos públicos por escrito',tag:'part',mood:'cheer',s:'Está escrito e assinado: vou cumprir cada ponto!',r:'Os compromissos foram aplaudidos e agora podem ser cobrados, o que gera expectativa.',e:[4,8,-2,3,-3,0]},
+ {l:'Fazer um discurso genérico',mood:'calm',s:'Vamos trabalhar juntos por dias melhores.',r:'O discurso foi educado, mas não empolgou ninguém.',e:[0,2,0,0,0,0]},
+ {l:'Criticar adversários e fugir dos compromissos',tag:'nopart',mood:'boo',s:'A culpa é de quem veio antes de nós!',r:'Parte da plateia gostou do ataque, mas muitos saíram sem respostas.',e:[-4,6,2,0,0,4]}]},
+{id:'ptTribunal',k:'part',p:['jud'],t:'Audiência pública no tribunal',d:'Um tema de grande impacto social chega ao tribunal, e entidades pedem uma audiência pública para ouvir a sociedade antes do julgamento.',n:'Audiências públicas nos tribunais ouvem especialistas e a sociedade antes de decisões complexas.',o:[
+ {l:'Convocar audiência pública com especialistas e a sociedade',tag:'part',mood:'cheer',s:'Antes de decidir, quero ouvir quem será afetado!',r:'A audiência trouxe novos argumentos, melhorou a legitimidade da decisão e atrasou um pouco o julgamento.',e:[7,5,0,2,0,0]},
+ {l:'Decidir apenas com base nos autos',mood:'calm',s:'Meu voto seguirá o que consta nos autos.',r:'A decisão técnica foi segura, mas foi criticada por falta de abertura.',e:[2,-2,2,0,2,0]},
+ {l:'Ouvir apenas as partes do processo',tag:'nopart',mood:'calm',s:'Receberei apenas as partes.',r:'O rito foi cumprido, mas a sociedade ficou de fora do debate.',e:[-2,-3,0,0,0,0]}]}
+);
+
+let qiv=null;
+function stopQ(){if(qiv){clearInterval(qiv);qiv=null;}}
+function runSteps(steps){
+  const run=()=>{
+    if(st.over)return;
+    const r=checkOver();if(r)return endGame(r);
+    const f=steps.shift();
+    if(!f){busy=false;refreshDash();return;}
+    f(run);
+  };
+  run();
+}
+const optBtn=(attr,i,l,top,chipHtml)=>`<button ${attr}="${i}" class="w-full rounded-2xl border border-white/10 bg-[#3a3a41] p-3 text-left transition hover:bg-[#44444c] active:scale-[.98]"><div class="flex gap-3"><div class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-sm font-extrabold">${top}</div><div class="text-sm font-semibold leading-snug">${l}</div></div>${chipHtml?`<div class="mt-2 flex flex-wrap gap-1.5">${chipHtml}</div>`:''}</button>`;
+const chanceChip=p=>`<span class="inline-flex items-center rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-bold text-sky-300">Chance ${Math.round(p)}%</span>`;
+const banner=k=>`<div class="-mx-5 -mt-5 mb-3 rounded-t-3xl border-b px-5 py-2 text-xs font-extrabold tracking-wider ${KIND[k].cls}"><span class="animate-pulse">${KIND[k].lab}</span></div>`;
+function resultHtml(head,text,d,note,extra){
+  return `<div class="text-xs font-bold uppercase tracking-wider text-neutral-400">${head}</div>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-200">${text}</p>${extra||''}
+    <div class="mt-3 flex flex-wrap gap-1.5">${chips(d)}</div>
+    ${note?`<div class="mt-4 rounded-2xl border border-sky-400/30 bg-sky-400/10 p-3 text-sm text-sky-100"><b>Você sabia?</b> ${note}</div>`:''}
+    <button id="go" class="mt-4 w-full rounded-2xl bg-emerald-500 py-3.5 text-base font-extrabold text-black transition active:scale-95">Continuar ▶</button>`;
+}
+
+/* ---------- Quick events ---------- */
+function stepQuick(done){
+  if(Math.random()>Math.min(0.85,0.25+0.075*(st.lastYears||4)))return done();
+  const pool=QUICK.filter(q=>q.p.includes(st.power)&&q.id!==st.lastQuick);
+  if(!pool.length)return done();
+  const q=rnd(pool);st.lastQuick=q.id;showQuick(q,done);
+}
+function showQuick(q,done){
+  const SECS=15;
+  openModal(`${banner(q.k)}
+    <div class="flex items-center gap-2"><div class="h-1.5 flex-1 overflow-hidden rounded-full bg-black/40"><div id="qbar" class="h-full rounded-full bg-rose-400" style="width:100%"></div></div><span id="qsec" class="w-8 text-right text-xs font-bold tabular-nums text-rose-300">${SECS}s</span></div>
+    <h2 class="mt-3 text-xl font-extrabold leading-tight">${q.t}</h2>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-300">${fillAto(q.d)}</p>
+    ${q.id==='media'&&st.risk>=50?`<p class="mt-2 rounded-xl bg-rose-500/15 p-2 text-xs font-semibold text-rose-200">⚠️ Seu Risco de Escândalo está em ${Math.round(st.risk)}%. A redação pode ter documentos.</p>`:''}
+    <p class="mt-2 text-[11px] font-semibold text-neutral-400">Decida rápido: se o tempo acabar, você perde a iniciativa.</p>
+    <div class="mt-3 space-y-3">${q.o.map((o,i)=>optBtn('data-q',i,fillAto(o.l),'ABC'[i],'')).join('')}</div>`);
+  const t0=Date.now(),bar=$('#qbar'),sec=$('#qsec');
+  stopQ();
+  qiv=setInterval(()=>{
+    if(!bar||!bar.isConnected){stopQ();return;}
+    const rem=Math.max(0,SECS-(Date.now()-t0)/1000);
+    bar.style.width=(rem/SECS*100)+'%';sec.textContent=Math.ceil(rem)+'s';
+    if(rem<=0){stopQ();resolveQuick(q,-1,done);}
+  },100);
+  modalEl.querySelectorAll('[data-q]').forEach(b=>b.addEventListener('click',()=>{stopQ();resolveQuick(q,+b.dataset.q,done);}));
+}
+function resolveQuick(q,i,done){
+  const o=i>=0?q.o[i]:{l:'Você hesitou',r:'O tempo acabou e outros decidiram por você. A iniciativa ficou com os seus adversários.',e:[-6,-4,-4,0,0,8]};
+  const d=applyEffects(o.e,1);
+  if(i>=0){st.lean=clamp(st.lean+leanOf(o.e),-60,60);updateAlign(o.e);}
+  if(i>=0){const tg=o.tag||(QTAG[q.id]||[])[i];if(tg)bump(tg);}
+  logAdd(`${q.t}: ${fillAto(o.l)}`);refreshDash();
+  if(i>=0&&o.s)showRally(o,q);
+  headlineIf({title:q.t,opt:fillAto(o.l),d});
+  const leak=!!o.deny&&st.risk>=50;
+  openModal(banner(q.k)+resultHtml('Resultado: '+fillAto(o.l),fillAto(o.r),d,q.n,leak?'<p class="mt-2 rounded-xl bg-rose-500/15 p-2 text-xs font-semibold text-rose-200">⚠️ Com o risco alto, a negativa não colou: documentos vão vazar.</p>':''));
+  $('#go').addEventListener('click',()=>{closeModal();leak?showLeak(done,true):done();});
+}
+
+/* ---------- Vazamento / escândalo ---------- */
+function stepLeak(done){
+  if(st.risk>=25&&Math.random()<(st.risk-15)/100*0.3)showLeak(done,false);else done();
+}
+function showLeak(done,forced){
+  const sv=st.risk/100;
+  const e=[-(8+Math.round(sv*14)),-(6+Math.round(sv*12)),-(4+Math.round(sv*10)),0,-3,20-st.risk];
+  const d=applyEffects(e,1);st.scandals++;
+  logAdd('Escândalo público: investigação aberta.');refreshDash();showHeadline(headlineFor({kind:'scandal',d}));
+  const txt={exe:'A Polícia Federal faz buscas em endereços ligados ao seu governo. O caso domina os telejornais.',leg:'O seu gabinete é alvo de uma operação. A imprensa publica trechos de mensagens e extratos.',jud:'A Corregedoria abre uma sindicância depois que mensagens suas vazam. O caso vira manchete nacional.'}[st.power];
+  openModal(banner('media').replace('REPORTAGEM BOMBÁSTICA','ESCÂNDALO VEM À TONA')+
+    `<h2 class="text-xl font-extrabold leading-tight">O passado bateu à porta</h2>`+
+    resultHtml('Consequência de ações anteriores',(forced?'Os documentos que você tentou negar vieram à tona. ':'Seus rastros foram descobertos. ')+txt,d,'Investigações são conduzidas pela Polícia Federal e pelo Ministério Público, mas só a Justiça pode condenar.'));
+  $('#go').addEventListener('click',()=>{closeModal();done();});
+}
+
+/* ---------- Eleição / reeleição ---------- */
+const electedOffice=()=>st.power==='leg'||(st.power==='exe'&&st.rank>=1);
+function electionChance(b){
+  let sc=0.45*st.ap+0.2*st.pr+0.15*st.es+0.2*clamp((st.idh-0.6)/0.3*100);
+  sc-=['ap','pr','es'].filter(k=>st[k]<25).length*18;
+  sc-=Math.max(0,st.risk-40)*0.4;
+  return clamp(sc+b,2,95);
+}
+function stepElection(done){
+  if(electedOffice()&&st.sinceElection>=8)showElection(done);else done();
+}
+function showElection(done){
+  const nm={ap:'Apoio Popular',pr:'Prestígio',es:'Estabilidade'},warns=[];
+  ['ap','pr','es'].forEach(k=>{if(st[k]<25)warns.push(`${nm[k]} crítico (${Math.round(st[k])}%): −18 pontos de chance`);});
+  if(st.risk>40)warns.push(`Risco de Escândalo alto (${Math.round(st.risk)}%): −${Math.round((st.risk-40)*.4)} pontos de chance`);
+  const base=Math.round(electionChance(0));
+  const opts=[
+   {l:'Campanha propositiva e transparente',b:0,e:[4,2,0,0,0,-6],r:'Sua campanha apostou em propostas e transparência.'},
+   {l:'Campanha agressiva, atacando os rivais',b:10,e:[-6,4,-4,0,0,10],r:'A campanha foi dura e polarizada.'},
+   {l:'Aliança ampla com o centrão',b:7,e:[-4,0,6,0,-3,6],r:'Você fechou alianças com vários partidos.'}];
+  openModal(`
+    <div class="text-xs font-bold uppercase tracking-wider text-sky-300">🗳️ Hora de ir às urnas · ${st.year} · ${st.age} anos</div>
+    <h2 class="mt-1 text-xl font-extrabold leading-tight">Eleição: continuar como ${cargo()}?</h2>
+    <p class="mt-2 text-sm text-neutral-300">Os eleitores vão decidir se você segue no cargo. Sua chance depende dos seus atributos.</p>
+    <div class="mt-3 rounded-2xl bg-black/25 p-3">
+      <div class="flex items-end justify-between"><span class="text-sm font-semibold">Chance de vitória hoje</span><span class="text-3xl font-extrabold tabular-nums" style="color:${colorOf(base)}">${base}%</span></div>
+      <div class="mt-2 h-2.5 overflow-hidden rounded-full bg-black/40"><div class="h-full rounded-full" style="width:${base}%;background:${colorOf(base)}"></div></div>
+      ${warns.length?`<ul class="mt-2 space-y-1 text-xs font-semibold text-rose-300">${warns.map(w=>`<li>⚠️ ${w}</li>`).join('')}</ul>`:'<p class="mt-2 text-xs text-neutral-400">Nenhum atributo em nível crítico.</p>'}
+    </div>
+    <div class="mt-3 space-y-3">${opts.map((o,i)=>optBtn('data-el',i,o.l,'ABC'[i],chanceChip(electionChance(o.b))+chips(preview(o.e,1)))).join('')}</div>`);
+  modalEl.querySelectorAll('[data-el]').forEach(b=>b.addEventListener('click',()=>{
+    const o=opts[+b.dataset.el],pc=electionChance(o.b),win=Math.random()*100<pc;
+    const d=applyEffects(o.e,1);
+    if(!win){logAdd('Derrota nas urnas.');return endGame('elec');}
+    st.sinceElection=0;
+    logAdd(`${curGender()==='f'?'Reeleita':'Reeleito'}: ${o.l.toLowerCase()}.`);bump('reel');refreshDash();
+    showHeadline(headlineFor({kind:'elecWin',d}));openModal(resultHtml('Resultado da eleição',`Você venceu! A chance era de ${Math.round(pc)}%. ${o.r}`,d,'O voto é obrigatório de 18 a 70 anos e facultativo para jovens de 16 e 17, maiores de 70 e analfabetos.'));
+    $('#go').addEventListener('click',()=>{closeModal();done();});
+  }));
+}
+
+/* ---------- Processo de cassação / impeachment ---------- */
+function procTrigger(){
+  if(st.power==='jud')return st.pr<=20||st.es<=15||st.risk>=90;
+  return st.es<=20||st.pr<=15||st.risk>=90;
+}
+function procChance(b){return clamp(22+0.55*st.es+0.25*st.ap+0.2*st.pr-0.3*st.risk-10*st.procs+b,3,90);}
+function stepProcess(done){if(procTrigger())showProcess(done);else done();}
+function showProcess(done){
+  const T={
+   exe:{t:'Pedido de impeachment aceito',d:'A Câmara autorizou a abertura do processo e o Senado vai julgá-lo. Para condenar, são necessários 2/3 dos votos.',n:'O impeachment exige autorização de 2/3 da Câmara (342 dos 513 deputados) e condenação por 2/3 do Senado (54 dos 81 senadores).'},
+   leg:{t:'Processo de cassação aberto',d:'O Conselho de Ética recomendou a perda do seu mandato. O plenário decide em votação.',n:'A cassação de deputados e senadores exige voto da maioria absoluta da respectiva Casa (art. 55 da Constituição).'},
+   jud:{t:'Processo disciplinar no CNJ',d:'O CNJ abriu um processo que pode levar ao seu afastamento do cargo.',n:'O CNJ fiscaliza o Judiciário e pode punir magistrados, inclusive com aposentadoria compulsória.'}}[st.power];
+  const why=[];
+  if(st.es<=20)why.push('Estabilidade/Apoio político em nível crítico');
+  if(st.pr<=(st.power==='jud'?20:15))why.push('Prestígio em nível crítico');
+  if(st.risk>=90)why.push('Risco de Escândalo no limite');
+  const opts=[
+   {l:'Contratar defesa técnica e provar sua versão',b:4,e:[6,0,0,0,0,-10]},
+   {l:'Articular nos bastidores com os parlamentares',b:14,e:[-6,0,4,0,-3,10]},
+   {l:'Apelar à opinião pública com discurso e mobilização',b:Math.round(st.ap*0.18),e:[0,6,-4,0,0,0]}];
+  const base=Math.round(procChance(0));
+  openModal(`
+    <div class="text-xs font-bold uppercase tracking-wider text-rose-300">⚖️ Zona de perigo · ${st.year} · ${st.age} anos</div>
+    <h2 class="mt-1 text-xl font-extrabold leading-tight">${T.t}</h2>
+    <p class="mt-2 text-sm text-neutral-300">${T.d}</p>
+    <ul class="mt-2 space-y-1 text-xs font-semibold text-rose-300">${why.map(w=>`<li>⚠️ ${w}</li>`).join('')}</ul>
+    <div class="mt-3 rounded-2xl bg-black/25 p-3"><div class="flex items-end justify-between"><span class="text-sm font-semibold">Chance de sobreviver</span><span class="text-3xl font-extrabold tabular-nums" style="color:${colorOf(base)}">${base}%</span></div>
+    ${st.procs?`<p class="mt-1 text-xs text-neutral-400">Reincidência: −${10*st.procs} pontos pelos processos anteriores.</p>`:''}</div>
+    <div class="mt-3 space-y-3">${opts.map((o,i)=>optBtn('data-pr',i,o.l,'ABC'[i],'')).join('')}</div>`);
+  modalEl.querySelectorAll('[data-pr]').forEach(b=>b.addEventListener('click',()=>{
+    const o=opts[+b.dataset.pr],pc=procChance(o.b),ok=Math.random()*100<pc;
+    if(!ok){logAdd('Processo de cassação/impeachment: você foi condenado.');return endGame('proc');}
+    const d=applyEffects(o.e.map((v,k)=>v+[0,0,10,0,0,-15][k]),1);
+    st.procs++;logAdd('Você sobreviveu a um processo de cassação/impeachment.');refreshDash();
+    showHeadline(headlineFor({kind:'procSurv',d}));openModal(resultHtml('Você sobreviveu',`Com ${Math.round(pc)}% de chance, você escapou por pouco. O sistema mostrou seus limites, e agora tudo está sob vigilância.`,d,T.n));
+    $('#go').addEventListener('click',()=>{closeModal();done();});
+  }));
+}
+
+/* ---------- Troca de partido ---------- */
+function stepParty(done){
+  if(st.power==='jud'||!isGeneral(st.year))return done();
+  if(!st.filiado)return partyWindow(done,true,'free');
+  if(st.year-st.fbYear>=8)return partyFeedback(done);
+  return maybeWindow(done);
+}
+function alignTone(a){return a>=60?'good':a>=45?'ok':a>=30?'warn':'expel';}
+function partyFeedback(done){
+  const k=st.party,x=PARTIES[k],al=Math.round(alignOf(k)),kind=alignTone(al);
+  st.fbYear=st.year;
+  const eff={good:[2,0,4,0,0,0],ok:[0,0,1,0,0,0],warn:[0,0,-3,0,0,0],expel:[-3,-3,-8,0,0,0]}[kind];
+  const d=applyEffects(eff,1);
+  logAdd(`Reunião de alinhamento com o ${x.sig}: alinhamento de ${al}%.`);
+  if(kind==='expel'){st.filiado=false;logAdd(`${x.sig} expulsou você por descumprir as diretrizes do partido.`);}
+  refreshDash();
+  showPartyMeeting(kind,al,d,()=>{
+    if(kind==='expel')return partyWindow(done,true,'expelled');
+    if(kind==='warn'){
+      return choice(`🔄 Depois da reunião · ${st.year}`,'O que você vai fazer?',`O ${x.sig} cobrou mais alinhamento. Você pode prometer fidelidade ou procurar outro partido agora, durante a janela partidária.`,
+        [{top:'🤝',l:`Prometer mais alinhamento ao ${x.sig}`},{top:'🔄',l:'Buscar outro partido na janela partidária'}],
+        i=>i===0?done():partyWindow(done,false,'voluntary'));
+    }
+    maybeWindow(done);
+  });
+}
+function maybeWindow(done){
+  const cur=st.party,ca=alignOf(cur),attract=(st.ap+st.pr)/2-st.risk*0.3;
+  const better=Object.keys(PARTIES).filter(k=>k!==cur&&alignOf(k)>=Math.max(55,ca+10));
+  if(attract>=45&&better.length&&Math.random()<0.7)return partyWindow(done,false,'invite');
+  done();
+}
+function partyWindow(done,forced,why){
+  const cur=st.filiado?st.party:null,attract=(st.ap+st.pr)/2-st.risk*0.3;
+  const items=Object.keys(PARTIES).map(k=>{
+    const x=PARTIES[k],a=Math.round(alignOf(k)),isCur=k===cur;
+    const ok=a>=50&&!isCur&&attract>=40;
+    const status=isCur?'Seu partido atual':a<50?'Bloqueado: alinhamento baixo':attract<40?'Sem convite: baixa projeção':a>=60?'Convite recebido':'Disponível';
+    const bar=`<div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10"><div class="h-full rounded-full" style="width:${a}%;background:${a>=60?'#34d399':a>=50?'#fbbf24':'#f87171'}"></div></div>`;
+    return {key:k,top:x.em,l:x.n,note:`Alinhamento ${a}% · ${status}`,html:bar,dis:!ok};
+  });
+  if(forced)items.push({none:true,top:'🚪',l:'Seguir sem partido',note:'Sem filiação você não pode disputar eleições.'});
+  else items.push({stay:true,top:'↩️',l:`Permanecer no ${PARTIES[cur].sig}`});
+  const T={
+    expelled:[G('Você foi expulso do partido','Você foi expulsa do partido'),'Para disputar eleições, você precisa de uma nova filiação. Cada partido só aceita quem tem pelo menos 50% de alinhamento com as suas diretrizes.'],
+    free:['Janela partidária: você está sem partido','Para disputar eleições, você precisa de uma filiação. Cada partido só aceita quem tem pelo menos 50% de alinhamento com as suas diretrizes.'],
+    voluntary:['Troca voluntária de partido','Veja o seu alinhamento com cada partido, calculado a partir das suas decisões ao longo da carreira. Só é possível entrar onde o alinhamento é de pelo menos 50%.'],
+    invite:['Convites na janela partidária','Outros partidos notaram o seu perfil. O alinhamento de cada um é calculado a partir das suas decisões ao longo da carreira.']}[why];
+  choice(`🔄 Janela partidária · ${st.year}`,T[0],T[1],items,i=>{
+    const it=items[i];
+    if(it.stay){logAdd(`Você permaneceu no ${PARTIES[cur].sig}.`);return done();}
+    if(it.none){logAdd('Você seguiu sem partido.');return done();}
+    const P2=PARTIES[it.key],d=applyEffects(P2.b.map((v,k)=>k===2?v-3:v),1);
+    st.party=it.key;st.filiado=true;st.partyPath.push(it.key);st.fbYear=st.year;bump('swap');
+    logAdd(`Você se filiou ao ${P2.n}.`);refreshDash();
+    showHeadline(headlineFor({kind:'party',d}));
+    openModal(resultHtml('Resultado',`Você agora é do ${P2.n}. Parte da imprensa chamou a troca de oportunismo, mas o novo grupo abriu espaço para você.`,d,'Parlamentares só podem trocar de partido sem risco para o mandato durante a janela partidária, que acontece perto das eleições.'));
+    $('#go').addEventListener('click',()=>{closeModal();done();});
+  });
+}
+function noParty(done){
+  if(!curOff()){logAdd('Sem partido, você não pode se candidatar.');return done();}
+  choice('🚫 Sem filiação','Sem partido, sem candidatura','Para disputar uma eleição no Brasil é preciso estar filiado a um partido. Sem filiação, você não pode se candidatar neste ciclo.',[{top:'➡️',l:'Seguir adiante'}],()=>showTransition(done,true));
+}
+function showPartyMeeting(kind,al,d,cb){
+  const k=st.party,x=PARTIES[k],col=PCOL[k],dec=PDECOR[k];
+  const pf=Math.random()<.5?'f':'m',pAv=avatarSvg(rndLook(pf),62,'p'+k),meAv=avatarSvg(st.look,st.age,st.power);
+  const LINES={
+    good:[`Você tem sido fiel às nossas diretrizes. Conte com o ${x.sig} nos próximos anos!`,`Seu alinhamento com o partido é de ${al}%. Vamos seguir juntos.`],
+    ok:[`Estamos alinhados na maior parte das pautas. Vamos manter o diálogo e a fidelidade.`,`Seu alinhamento com o partido é de ${al}%. Continue assim.`],
+    warn:[`Suas últimas decisões destoam do nosso programa. Preciso de mais alinhamento daqui para frente.`,`Seu alinhamento com o partido caiu para ${al}%.`],
+    expel:[`A executiva decidiu: você está ${G('expulso','expulsa')} por descumprir as diretrizes do partido.`,`Seu alinhamento ficou em ${al}%, abaixo do mínimo exigido.`]}[kind];
+  const col2=kind==='good'?'#34d399':kind==='ok'?'#fbbf24':'#f87171';
+  const dc=[[6,34],[84,30],[10,58],[80,56]].map((p,i)=>`<span class="absolute" style="left:${p[0]}%;top:${p[1]}%;font-size:24px;opacity:.85">${dec[i%3]}</span>`).join('');
+  showCut(`<div class="pop overflow-hidden rounded-2xl shadow-2xl" style="background:#15151a">
+    <div class="px-3 py-2 text-center text-xs font-extrabold tracking-wider text-white" style="background:${col}">${x.em} ${x.n.toUpperCase()} · REUNIÃO DE ALINHAMENTO</div>
+    <div class="relative overflow-hidden" style="aspect-ratio:4/3;background:linear-gradient(${shade(col,.25)},${shade(col,.65)})">
+      <div class="absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-4 py-0.5 text-xl font-black text-white" style="background:${col};border:3px solid rgba(255,255,255,.85)">${x.sig}</div>
+      ${dc}
+      <div class="absolute inset-x-0 bottom-0" style="height:24%;background:#3a2a1c"></div>
+      <div class="absolute bottom-0 left-1 w-[42%]" style="aspect-ratio:1/1">${pAv}</div>
+      <div class="absolute bottom-0 right-1 w-[42%]" style="aspect-ratio:1/1">${meAv}</div>
+      <div class="absolute bottom-0 left-1/2 h-[14%] w-[22%] -translate-x-1/2 rounded-t-md" style="background:linear-gradient(#6b4a2b,#4f2f1c)"></div>
+      <div class="absolute left-2 right-2 top-12 space-y-1.5">
+        <div class="max-w-[90%] rounded-2xl bg-white px-3 py-1.5 text-xs font-bold leading-snug text-black"><span class="text-[10px] uppercase text-neutral-500">${pf==='f'?'Presidente do partido':'Presidente do partido'}</span><br>${LINES[0]}</div>
+        <div class="ml-auto max-w-[90%] rounded-2xl bg-sky-100 px-3 py-1.5 text-xs font-bold leading-snug text-black">${LINES[1]}</div>
+      </div></div>
+    <div class="p-3"><div class="flex items-center justify-between text-xs font-semibold"><span>Alinhamento com o ${x.sig}</span><span class="tabular-nums" style="color:${col2}">${al}%</span></div>
+      <div class="mt-1 h-2 overflow-hidden rounded-full bg-white/10"><div class="h-full rounded-full" style="width:${al}%;background:${col2}"></div></div>
+      <div class="mt-2 flex flex-wrap justify-center gap-1.5">${chips(d)}</div>
+      <button data-cutclose class="mt-3 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div></div>`,
+    ()=>sfx(kind==='good'||kind==='ok'?'ding':kind==='warn'?'pow':'drum'),
+    ()=>{if(kind==='expel')showHeadline({h:`${firstName()} ${G('é expulso','é expulsa')} do ${x.sig} por descumprir diretrizes`,sub:`O ${x.n} decidiu desfiliar ${G('o político','a política')} após queda de alinhamento.`,tone:'neg'});cb();});
+}
+function stepTransition(done){
+  if(st.sinceOffer>=10&&st.age<=68)showTransition(done);else done();
+}
+
+/* ===================== JANELA (i): FUNÇÃO DO CARGO ===================== */
+const CARGO_INFO={
+ 'Juiz Federal':{faz:'Julga, em primeira instância, causas da Justiça Federal: ações contra a União, crimes federais e questões previdenciárias, por exemplo. Aplica as leis, protege direitos e decide conflitos com imparcialidade.',chega:'Entra por concurso público muito concorrido e ganha vitaliciedade após 2 anos de exercício. Aposenta-se compulsoriamente aos 75 anos.',cid:'É a porta de entrada da Justiça Federal para o cidadão que precisa garantir um direito diante do poder público.'},
+ 'Desembargador Federal (TRF)':{faz:'Atua nos Tribunais Regionais Federais, que julgam os recursos contra as decisões dos juízes federais e podem rever sentenças.',chega:'Chega por promoção de juízes federais (antiguidade e merecimento), com uma parte das vagas destinada a advogados e membros do Ministério Público (quinto constitucional). Existem seis TRFs no país.',cid:'Garante uma segunda análise: quem perdeu na primeira instância pode recorrer.'},
+ 'Ministro de Tribunal Superior':{faz:'Julga nos tribunais superiores, como o STJ, que uniformiza a interpretação da lei federal em todo o país, ou o TST, o TSE e o STM, cada um com a sua área.',chega:'É indicado pelo presidente da República e aprovado pelo Senado, com notório saber jurídico e reputação ilibada.',cid:'Suas decisões viram referência: tribunais de todo o país passam a seguir o mesmo entendimento sobre a lei.'},
+ 'Ministro do STF':{faz:'É o guardião da Constituição: julga se leis e atos respeitam a Constituição e processa autoridades com foro, como o presidente e parlamentares, em crimes comuns.',chega:'São 11 ministros, indicados pelo presidente e aprovados pela maioria absoluta do Senado, com notório saber jurídico e reputação ilibada. A aposentadoria compulsória é aos 75 anos.',cid:'Decide questões que afetam os direitos de todos os brasileiros e funciona como árbitro quando os Poderes entram em conflito.'},
+ 'Deputado Federal':{faz:'Representa o povo na Câmara dos Deputados: vota leis, aprova o orçamento, fiscaliza o Executivo e pode abrir CPIs.',chega:'É eleito pelo voto, com mandato de 4 anos e sem limite de reeleições. A Câmara tem 513 deputados e a idade mínima é de 21 anos.',cid:'Leva as demandas da população para o debate das leis, e o seu voto é que escolhe quem ocupa a vaga.'},
+ 'Senador da República':{faz:'Representa os estados e o Distrito Federal no Senado: vota leis, aprova indicações de autoridades (como ministros do STF) e julga o impeachment do presidente.',chega:'É eleito pelo voto, com mandato de 8 anos. São 81 senadores, 3 por estado e pelo DF, e a idade mínima é de 35 anos.',cid:'Garante que estados pequenos e grandes tenham a mesma voz nas decisões nacionais.'},
+ 'Presidente do Senado Federal':{faz:'Comanda os trabalhos do Senado e do Congresso Nacional: conduz as sessões e tem grande influência sobre a pauta das votações.',chega:'É eleito pelos próprios senadores, para mandato de 2 anos, e é o terceiro na linha de sucessão da Presidência da República (depois do vice-presidente e do presidente da Câmara).',cid:'Tem poder sobre quais temas chegam a votação, o que afeta diretamente quais leis o cidadão verá aprovadas.'},
+ 'Ministro de Estado':{faz:'Chefia um ministério (como Saúde, Educação ou Justiça), executa as políticas do governo e auxilia o presidente.',chega:'É nomeado e demitido livremente pelo presidente da República, sem mandato fixo. A idade mínima é de 21 anos.',cid:'Transforma as decisões do governo em serviços que o cidadão usa no dia a dia, como vacinas, escolas e segurança.'},
+ 'Governador de Estado':{faz:'Chefia o Executivo estadual: administra saúde, educação, segurança pública (Polícias Civil e Militar) e obras do estado.',chega:'É eleito pelo voto, com mandato de 4 anos e direito a uma reeleição. A idade mínima é de 30 anos.',cid:'É o gestor mais próximo do cidadão em serviços essenciais e responde diretamente aos eleitores do estado.'},
+ 'Presidente da República':{faz:'É chefe de Estado e de governo: sanciona ou veta leis, comanda as Forças Armadas, nomeia ministros e conduz a política externa.',chega:'É eleito pelo voto direto, com mandato de 4 anos e direito a uma reeleição. A idade mínima é de 35 anos.',cid:'Suas decisões alcançam todo o país, mas ele precisa de maioria no Congresso e responde por crime de responsabilidade (impeachment).'}
+};
+function showCargoInfo(power,rank,cb,isNew){
+  const pw=P[power],r=pw.ranks[rank],inf=CARGO_INFO[r.n];
+  const lab='text-[11px] font-bold uppercase tracking-wide text-neutral-400';
+  openModal(`
+    <div class="flex items-center gap-2">
+      <span class="grid h-7 w-7 place-items-center rounded-full border border-white/30 bg-white/10 text-sm font-extrabold italic">i</span>
+      <span class="text-xs font-bold uppercase tracking-wider ${pw.txt}">${isNew?'Seu novo cargo':'Sobre o cargo'} · ${pw.n}</span>
+    </div>
+    <h2 class="mt-2 text-xl font-extrabold leading-tight">${pw.em} ${gn(r.n)}</h2>
+    <div class="mt-3 space-y-3 text-sm leading-relaxed">
+      <div><div class="${lab}">O que faz</div><p class="mt-0.5 text-neutral-100">${inf.faz}</p></div>
+      <div><div class="${lab}">Como se chega e por quanto tempo</div><p class="mt-0.5 text-neutral-100">${inf.chega}</p></div>
+      <div class="rounded-2xl border p-3 ${pw.bd} ${pw.soft}"><div class="text-[11px] font-bold uppercase tracking-wide ${pw.txt}">Papel na cidadania</div><p class="mt-0.5 text-neutral-100">${inf.cid}</p></div>
+    </div>
+    <button id="infoOk" class="mt-4 w-full rounded-2xl bg-emerald-500 py-3.5 text-base font-extrabold text-black transition active:scale-95">${isNew?'Assumir o cargo ▶':'Entendi'}</button>`);
+  $('#infoOk').addEventListener('click',()=>{closeModal();if(cb)cb();});
+}
+
+/* ===================== SOM · CUTSCENES · BANNERS · CONQUISTAS ===================== */
+const bump=k=>{st.cnt[k]=(st.cnt[k]||0)+1;};
+const QTAG={maleta:['corr','int','den'],caixa2:['corr','int','int'],tentativa:['corr','int','den'],aliado:['den','','omit'],dossie:['','den',''],nepotismo:['corr','int','int'],jatinho:['corr','int','int'],fiscal:['den','','corr'],telefonema:['corr','int',''],lobby:['int','corr',''],delacao:['int','','']};
+const firstName=()=>esc(st.name.split(' ')[0]);
+
+/* ---------- sons (WebAudio, sem arquivos) ---------- */
+let AC=null,soundOn=true;
+function actx(){
+  try{
+    if(!AC){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;AC=new C();}
+    if(AC.state==='suspended')AC.resume();
+    return AC;
+  }catch(e){return null;}
+}
+function tone(f,t0,dur,type,vol,f2){
+  const a=actx();if(!a)return;
+  const o=a.createOscillator(),g=a.createGain(),t=a.currentTime+t0;
+  o.type=type||'sine';o.frequency.setValueAtTime(f,t);
+  if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+  g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(vol||.15,t+.02);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(a.destination);o.start(t);o.stop(t+dur+.05);
+}
+function noise(t0,dur,vol,freq,q,swell){
+  const a=actx();if(!a)return;
+  const n=Math.floor(a.sampleRate*dur),buf=a.createBuffer(1,n,a.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
+  const src=a.createBufferSource();src.buffer=buf;
+  const fl=a.createBiquadFilter();fl.type='bandpass';fl.frequency.value=freq||1000;fl.Q.value=q||.7;
+  const g=a.createGain(),t=a.currentTime+t0;
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(vol||.2,t+(swell?dur*.5:.02));
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(fl);fl.connect(g);g.connect(a.destination);src.start(t);
+}
+function sfx(n){
+  if(!soundOn)return;
+  try{
+    if(n==='pow'){noise(0,.28,.4,900,.8);tone(170,0,.28,'square',.18,55);}
+    else if(n==='fanfare'){[523,659,784,1047].forEach((f,i)=>tone(f,i*.14,.38,'triangle',.18));tone(1047,.6,.6,'triangle',.14);}
+    else if(n==='sunset'){[392,494,587,784].forEach((f,i)=>tone(f,i*.35,1.1,'sine',.12));}
+    else if(n==='paper'){noise(0,.2,.25,3200,.6);noise(.14,.14,.18,2400,.6);tone(880,.1,.15,'sine',.06);}
+    else if(n==='jingle'){[659,784,988,784,1047].forEach((f,i)=>tone(f,i*.12,.2,'square',.07));}
+    else if(n==='ding'){tone(1320,0,.25,'sine',.1);tone(1760,.12,.3,'sine',.08);}
+    else if(n==='drum'){for(let i=0;i<5;i++)tone(120,i*.18,.15,'sine',.2,60);}
+    else if(n==='crowd'){noise(0,1.6,.22,700,.35,true);noise(.2,1.4,.15,1800,.5,true);[0,.3,.55].forEach(x=>tone(900+x*400,x+.2,.12,'triangle',.05));}
+  }catch(e){}
+}
+(function(){
+  const b=document.getElementById('sndBtn');
+  if(b)b.addEventListener('click',()=>{soundOn=!soundOn;b.textContent=soundOn?'🔊':'🔇';if(soundOn)sfx('paper');});
+})();
+
+/* ---------- fila de cutscenes (sobrepõe os modais) ---------- */
+const cutQ=[];let cutOn=false,curCut=null;
+function showCut(html,snd,onClose){cutQ.push({html,snd,onClose});if(!cutOn)nextCut();}
+function nextCut(){
+  const c=cutQ.shift(),el=$('#cut');
+  if(!c){cutOn=false;el.innerHTML='';return;}
+  cutOn=true;curCut=c;
+  el.innerHTML=`<div class="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/80 p-3" style="padding-top:calc(.75rem + env(safe-area-inset-top,0px));padding-bottom:calc(.75rem + env(safe-area-inset-bottom,0px))"><div class="w-full max-w-md">${c.html}</div></div>`;
+  if(c.snd)c.snd();
+  el.querySelectorAll('[data-cutclose]').forEach(b=>b.addEventListener('click',()=>{nextCut();if(c.onClose)c.onClose();}));
+}
+
+/* ---------- manchete: O Diário do Povo ---------- */
+const isBig=d=>Math.max(Math.abs(d[0]),Math.abs(d[1]),Math.abs(d[2]),Math.abs(d[4]))>=7||d[5]>=14;
+function headlineFor(c){
+  const n=firstName(),who=`${cargo()} ${n}`,d=c.d||[0,0,0,0,0,0];
+  let h,tone='mix';
+  if(c.kind==='scandal'){h=`Operação mira ${who}; caso domina o noticiário`;tone='neg';}
+  else if(c.kind==='elecWin'){h=`${n} vence a eleição e segue no cargo`;tone='pos';}
+  else if(c.kind==='procSurv'){h=`${who} escapa de processo por pouco e Brasília respira`;}
+  else if(c.kind==='party'){h=`${n} troca de partido e agita os bastidores`;}
+  else if(d[5]>=12){h=`Bastidores: ${who} entra no radar de investigadores`;tone='neg';}
+  else if(d[1]>=6){h=`${who} ganha as ruas após decisão sobre "${c.title}"`;tone='pos';}
+  else if(d[1]<=-7){h=`Decisão de ${who} derruba a popularidade`;tone='neg';}
+  else if(d[2]<=-7){h=`Crise entre os Poderes: ${who} desagrada aliados`;tone='neg';}
+  else if(d[0]>=5){h=`Juristas elogiam a postura de ${who} em "${c.title}"`;tone='pos';}
+  else if(d[0]<=-6){h=`Credibilidade de ${who} é posta em xeque`;tone='neg';}
+  else if(d[2]>=6){h=`${who} fecha acordo e acalma o Congresso`;tone='pos';}
+  else h=`${who} decide sobre "${c.title}"`;
+  const sub=c.opt?`Aos ${st.age} anos, a decisão foi: ${c.opt}.`:`Aos ${st.age} anos, o caso movimenta a política nacional.`;
+  return {h,sub,tone};
+}
+const COMM={
+  pos:['“Finalmente alguém com coragem!”','“Esse sim trabalha pelo povo.”','“Tomara que cumpra o que prometeu.”','“Gostei da postura.”'],
+  neg:['“Mais uma decisão que vai custar caro...”','“Isso não vai ficar assim.”','“Cadê a transparência?”','“Perdeu meu voto.”'],
+  mix:['“Tem pontos bons e ruins.”','“Vamos esperar para ver.”','“O tempo vai dizer.”','“Decisão polêmica, como sempre.”']
+};
+function showHeadline(x){
+  const cm=COMM[x.tone].slice().sort(()=>Math.random()-.5).slice(0,2);
+  const tag={pos:['#166534','AVANÇO'],neg:['#991b1b','CRISE'],mix:['#92400e','EM DEBATE']}[x.tone];
+  showCut(`<div class="pop overflow-hidden rounded-xl shadow-2xl" style="background:#f4efe3;color:#1a1a1a">
+    <div class="px-4 pt-3 text-center" style="border-bottom:4px double #111">
+      <div class="font-serif text-[10px] font-bold tracking-[.3em]">EDIÇÃO DIGITAL · ${st.year}</div>
+      <div class="font-serif text-3xl font-black leading-tight">O Diário do Povo</div>
+      <div class="mt-1 flex justify-between border-t border-black py-1 font-serif text-[10px] font-bold uppercase"><span>Brasília</span><span style="color:#b91c1c">● Ao vivo</span><span>${esc(st.ufName)}</span></div>
+    </div>
+    <div class="px-4 py-3">
+      <span class="inline-block rounded px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-white" style="background:${tag[0]}">${tag[1]}</span>
+      <h2 class="mt-2 font-serif text-2xl font-black leading-tight">${x.h}</h2>
+      <p class="mt-2 font-serif text-sm italic text-neutral-700">${x.sub}</p>
+      <div class="mt-3 flex gap-3">
+        <div class="h-20 w-20 shrink-0 overflow-hidden border-2 border-black bg-neutral-300 grayscale">${avatarSvg(st.look,st.age,st.power)}</div>
+        <div class="min-w-0 text-xs"><div class="font-bold">Foto: ${cargo()} ${firstName()}</div>
+          <div class="mt-1 space-y-1 font-serif text-neutral-700">${cm.map(c=>`<div>💬 ${c} <span class="text-neutral-500">· ${3+Math.floor(Math.random()*90)} curtidas</span></div>`).join('')}</div></div>
+      </div>
+      <button data-cutclose class="mt-3 w-full rounded-lg bg-black py-2.5 text-sm font-extrabold text-white active:scale-95">Fechar notícia ✕</button>
+    </div></div>`,()=>sfx('paper'));
+}
+function headlineIf(c){if(isBig(c.d))showHeadline(headlineFor(c));}
+
+/* ---------- cenários 2D (banners e quadrinhos) ---------- */
+let uid=0;
+function bannerKindFor(power,rank){return power==='leg'?(rank===0?'cam':'sen'):power==='exe'?'exe':'jud';}
+function congress(u,emph,dark){
+  const wall=dark?'#2a1f3d':'#f3f3f1',line=dark?'#17102a':'#aeb3b8',slab=dark?'#241a38':'#ececea',slab2=dark?'#150f26':'#b0b0ac',dm=dark?'#2a1f3d':'#f7f7f5';
+  const rS=emph==='sen'?68:emph==='cam'?44:50,rC=emph==='cam'?68:emph==='sen'?44:50;
+  const tC=92-rC*0.75;
+  const dome=`<path d="M${95-rS} 92A${rS} ${rS*.75} 0 0 1 ${95+rS} 92Z" fill="${dm}" stroke="${line}" stroke-width="1.5"/>`+(dark?'':`<ellipse cx="${95-rS*.35}" cy="${92-rS*.55}" rx="${rS*.2}" ry="3" fill="#fff" opacity=".7"/>`);
+  const bowl=`<path d="M${265-rC} ${tC}A${rC} ${rC*.75} 0 0 0 ${265+rC} ${tC}Z" fill="${dm}" stroke="${line}" stroke-width="1.5"/><ellipse cx="265" cy="${tC}" rx="${rC}" ry="5" fill="${dark?'#3b2d55':'#c3cad0'}" stroke="${line}"/>`;
+  const defs=`<pattern id="w${u}" width="6" height="7" patternUnits="userSpaceOnUse"><rect x="1.2" y="2" width="3.6" height="3" fill="${dark?'#ffd36e':'#5f86ad'}"/></pattern>`;
+  const towers=[156,182].map(x=>`<rect x="${x}" y="8" width="22" height="84" fill="${wall}" stroke="${line}"/><rect x="${x+1}" y="10" width="20" height="80" fill="url(#w${u})"/>`).join('')+`<rect x="178" y="34" width="4" height="3" fill="${wall}"/><rect x="178" y="60" width="4" height="3" fill="${wall}"/>`;
+  return {defs,body:`<rect x="14" y="92" width="332" height="8" fill="${slab}"/><rect x="14" y="100" width="332" height="4" fill="${slab2}"/>${dome}${bowl}${towers}`};
+}
+function scene(kind,u){
+  const gid=`s${u}`;
+  const sky=(a,b)=>`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`;
+  if(kind==='cam'||kind==='sen'){
+    const c=congress(u,kind,false);
+    return `<defs>${sky('#6bbcf0','#d9f1fb')}${c.defs}</defs><rect width="360" height="120" fill="url(#${gid})"/><circle cx="324" cy="22" r="11" fill="#fff4b8" opacity=".9"/><ellipse cx="58" cy="24" rx="26" ry="7" fill="#fff" opacity=".85"/><ellipse cx="80" cy="19" rx="16" ry="6" fill="#fff" opacity=".85"/><rect y="104" width="360" height="16" fill="#cfcfc9"/>${c.body}`;
+  }
+  if(kind==='ret'){
+    const c=congress(u,'both',true);
+    const stars=[[20,10],[60,24],[110,8],[250,14],[300,26],[340,10],[200,22],[150,16]].map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="1" fill="#fff" opacity=".8"/>`).join('');
+    return `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b2a5e"/><stop offset=".55" stop-color="#c2456b"/><stop offset="1" stop-color="#ff9e4a"/></linearGradient>${c.defs}</defs><rect width="360" height="120" fill="url(#${gid})"/>${stars}<circle cx="180" cy="84" r="42" fill="#ffd36e" opacity=".22"/><circle cx="180" cy="84" r="26" fill="#ffd36e"/><rect y="104" width="360" height="16" fill="#1a1230"/>${c.body}<path d="M40 30q6-6 12 0M58 22q5-5 10 0M300 36q6-6 12 0" stroke="#1a1230" stroke-width="1.5" fill="none"/>`;
+  }
+  if(kind==='exe'){
+    const cols=Array.from({length:16},(_,i)=>{const x=54+i*16;return `<path d="M${x-3} 58L${x+3} 58Q${x+.5} 74 ${x+3} 92L${x-3} 92Q${x-.5} 74 ${x-3} 58Z" fill="#fcfcfa" stroke="#c9c9c5" stroke-width=".5"/>`;}).join('');
+    return `<defs>${sky('#6bbcf0','#d9f1fb')}<pattern id="g${u}" width="10" height="35" patternUnits="userSpaceOnUse"><rect width="2" height="35" fill="#7ea3c5"/></pattern></defs><rect width="360" height="120" fill="url(#${gid})"/><circle cx="40" cy="22" r="11" fill="#fff4b8" opacity=".9"/><ellipse cx="280" cy="22" rx="28" ry="7" fill="#fff" opacity=".85"/><rect y="104" width="360" height="16" fill="#cfcfc9"/>
+      <rect x="36" y="48" width="288" height="9" fill="#f6f6f4" stroke="#b0b0ac"/><rect x="46" y="57" width="268" height="35" fill="#4f78a0"/><rect x="46" y="57" width="268" height="35" fill="url(#g${u})"/><rect x="164" y="74" width="32" height="18" fill="#243447"/>${cols}
+      <rect x="30" y="92" width="300" height="6" fill="#e9e9e6"/><rect x="22" y="98" width="316" height="6" fill="#d6d6d2"/>
+      <rect x="338" y="18" width="2" height="86" fill="#cfcfcf"/><rect x="340" y="18" width="18" height="12" fill="#009c3b"/><path d="M349 20L356 24L349 28L342 24Z" fill="#ffdf00"/><circle cx="349" cy="24" r="2.2" fill="#1e3a9a"/>`;
+  }
+  /* jud: plenário de corte de justiça */
+  const colsJ=[40,120,240,320].map(x=>`<rect x="${x-12}" y="0" width="24" height="6" fill="#d8d0ba"/><rect x="${x-9}" y="6" width="18" height="96" fill="#ece8dc"/><rect x="${x-4}" y="6" width="1" height="96" fill="#cfc8b4"/><rect x="${x+3}" y="6" width="1" height="96" fill="#cfc8b4"/>`).join('');
+  const chairs=[0,1,2,3,4].map(i=>{const x=70+i*50;return `<rect x="${x}" y="54" width="28" height="32" rx="6" fill="#2b2b33"/>`+(i>0&&i<4?`<circle cx="${x+14}" cy="66" r="6" fill="#e0b08a"/><rect x="${x+4}" y="72" width="20" height="14" rx="5" fill="#111"/>`:'');}).join('');
+  return `<defs>${sky('#e6d6b4','#c9b48a')}</defs><rect width="360" height="120" fill="url(#${gid})"/>${colsJ}
+    <rect x="0" y="0" width="14" height="102" fill="#8b1e2d"/><rect x="346" y="0" width="14" height="102" fill="#8b1e2d"/>
+    <circle cx="180" cy="32" r="22" fill="#f4efe0" stroke="#b8942a" stroke-width="2"/><rect x="179" y="18" width="2" height="30" fill="#b8942a"/><rect x="164" y="24" width="32" height="2" fill="#b8942a"/><path d="M164 26L160 36M164 26L172 36M196 26L188 36M196 26L200 36" stroke="#b8942a" stroke-width=".8" fill="none"/><path d="M160 36Q166 44 172 36Z" fill="#d4a62a"/><path d="M188 36Q194 44 200 36Z" fill="#d4a62a"/>
+    ${chairs}<rect x="56" y="78" width="248" height="24" fill="#5b3a21"/><rect x="56" y="78" width="248" height="4" fill="#7a4e2c"/><path d="M80 84v14M130 84v14M180 84v14M230 84v14M280 84v14" stroke="#4a2e19" stroke-width="2"/>
+    <rect y="102" width="360" height="18" fill="#7a4a2b"/><path d="M0 110H360M0 116H360" stroke="#5e3920" stroke-width="1"/>`;
+}
+function bannerSvg(kind){return `<svg viewBox="0 0 360 120" preserveAspectRatio="xMidYMid slice" class="h-full w-full" aria-hidden="true">${scene(kind,++uid)}</svg>`;}
+
+/* ---------- cutscene em quadrinhos: posse e aposentadoria ---------- */
+const wrapTxt=(t,n)=>{const L=[];let c='';t.split(' ').forEach(x=>{if((c+' '+x).trim().length>n){L.push(c.trim());c=x;}else c=(c+' '+x).trim();});if(c)L.push(c);return L;};
+function showComic(kind,power,rank){
+  const u=++uid,ret=kind==='retire';
+  const sk=ret?'ret':bannerKindFor(power,rank);
+  const cn=ret?cargo():gn(P[power].ranks[rank].n);
+  const speech=ret?'Missão cumprida! O Brasil segue em frente.':'Prometo manter, defender e cumprir a Constituição!';
+  const big=ret?'FIM':'POSSE!';
+  const cap=ret?'Aposentadoria aos 75 anos':cn;
+  const font='font-family="Arial Black,Arial,sans-serif"';
+  const p1=`<svg viewBox="0 0 360 120" class="block w-full">${scene(sk,u)}<rect x="6" y="6" width="${ret?122:116}" height="16" fill="#ffd900" stroke="#111" stroke-width="2"/><text x="12" y="18" font-size="9" font-weight="800" ${font}>${ret?`${st.year} · AOS 75 ANOS`:`BRASÍLIA · ${st.year}`}</text></svg>`;
+  const lines=wrapTxt(speech,17),bh=10+lines.length*10;
+  const av=avatarSvg(st.look,st.age,st.power).replace('<svg ','<svg x="-8" y="26" width="98" height="98" ');
+  const p2=`<svg viewBox="0 0 180 120" class="block w-full"><defs><pattern id="h${u}" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1" fill="rgba(0,0,0,.2)"/></pattern></defs><rect width="180" height="120" fill="${ret?'#f6c9a0':'#bfe3f7'}"/><rect width="180" height="120" fill="url(#h${u})"/>${av}
+    <rect x="64" y="6" width="112" height="${bh}" rx="8" fill="#fff" stroke="#111" stroke-width="2"/>
+    <path d="M86 ${bh+4}L76 ${bh+20}L100 ${bh+4}Z" fill="#fff" stroke="#111" stroke-width="2"/><rect x="88" y="${bh+1}" width="10" height="6" fill="#fff"/>
+    <text font-size="8.5" font-weight="800" font-family="Comic Sans MS,Comic Neue,cursive" fill="#111">${lines.map((l,i)=>`<tspan x="70" y="${19+i*10}">${esc(l)}</tspan>`).join('')}</text></svg>`;
+  const rays=Array.from({length:18},(_,i)=>{const a1=i*Math.PI*2/18,a2=(i+.5)*Math.PI*2/18;return `<path d="M90 60L${(90+150*Math.cos(a1)).toFixed(1)} ${(60+150*Math.sin(a1)).toFixed(1)}L${(90+150*Math.cos(a2)).toFixed(1)} ${(60+150*Math.sin(a2)).toFixed(1)}Z" fill="${i%2?'#ffd900':'#ff5a36'}"/>`;}).join('');
+  const p3=`<svg viewBox="0 0 180 120" class="block w-full"><rect width="180" height="120" fill="#ffd900"/>${rays}<text x="90" y="66" text-anchor="middle" font-size="${ret?40:30}" font-weight="900" fill="#fff" stroke="#111" stroke-width="5" paint-order="stroke" ${font} transform="rotate(-6 90 60)">${big}</text>
+    <rect x="8" y="92" width="164" height="21" fill="#fff" stroke="#111" stroke-width="2"/><text x="90" y="106" text-anchor="middle" font-size="9" font-weight="800" ${font} fill="#111">${esc(cap)}</text></svg>`;
+  const bd=d=>`style="border:3px solid #111;animation-delay:${d}s"`;
+  showCut(`<div class="pop mx-auto w-full rounded-lg p-2 shadow-2xl" style="background:#fffdf3;border:4px solid #111">
+    <div class="mb-1 flex items-center justify-between"><span class="rounded px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-white" style="background:#e63946;font-family:Impact,Arial Black,sans-serif">${ret?'Capítulo final':'Novo capítulo'}</span><span class="text-[10px] font-bold text-neutral-700">${P[power].n}</span></div>
+    <div class="space-y-1.5">
+      <div class="pop" ${bd(0)}>${p1}</div>
+      <div class="grid grid-cols-2 gap-1.5"><div class="pop" ${bd(.25)}>${p2}</div><div class="pop" ${bd(.5)}>${p3}</div></div>
+    </div>
+    <button data-cutclose class="mt-2 w-full rounded-lg border-2 border-black bg-[#ffd900] py-2.5 text-sm font-black text-black active:scale-95">${ret?'Ver meu legado ▶':'Assumir o cargo ▶'}</button></div>`,
+    ()=>{sfx('pow');setTimeout(()=>sfx(ret?'sunset':'fanfare'),380);});
+}
+
+/* ---------- cutscene de participação popular (comício) ---------- */
+function crowdSvg(mood){
+  let seed=7;const r=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+  const cols=['#e63946','#f4a261','#2a9d8f','#457b9d','#ffd166','#8d5fd3','#06d6a0','#ef476f','#118ab2','#ffffff','#fb8500'];
+  const boo=mood==='boo';
+  let o=`<svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" class="absolute inset-0 h-full w-full"><defs><linearGradient id="rsky${++uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${boo?'#5a4a6a':'#ffb26b'}"/><stop offset="1" stop-color="${boo?'#9a7a8a':'#ffe3a8'}"/></linearGradient></defs><rect width="400" height="300" fill="url(#rsky${uid})"/>`;
+  o+=`<g fill="#6b5b7a" opacity=".55">${[[0,120,30,60],[30,100,26,80],[58,130,34,50],[300,110,34,70],[336,95,28,85],[366,125,34,55]].map(b=>`<rect x="${b[0]}" y="${b[1]}" width="${b[2]}" height="${b[3]}"/>`).join('')}</g><rect y="165" width="400" height="135" fill="#8c8c86"/>`;
+  [[185,9,22],[210,11,20],[240,13,18]].forEach(row=>{
+    const y=row[0],hr=row[1],n=row[2];
+    for(let i=0;i<n;i++){
+      const x=(i+r()*.6)*(400/n)+6,c=cols[Math.floor(r()*cols.length)],sk=SKINS[Math.floor(r()*SKINS.length)];
+      o+=`<rect x="${(x-hr*.9).toFixed(1)}" y="${(y+hr*.6).toFixed(1)}" width="${(hr*1.8).toFixed(1)}" height="${(hr*2.4).toFixed(1)}" rx="${(hr*.6).toFixed(1)}" fill="${c}"/><circle cx="${x.toFixed(1)}" cy="${y}" r="${hr}" fill="${sk}"/>`;
+      if(r()<.22)o+=`<rect x="${(x+hr*.8).toFixed(1)}" y="${(y-hr*1.6).toFixed(1)}" width="${(hr*.5).toFixed(1)}" height="${(hr*1.8).toFixed(1)}" rx="${(hr*.25).toFixed(1)}" fill="${sk}"/>`;
+    }
+  });
+  const words=['SAÚDE','ESCOLA','EMPREGO','MORADIA','PAZ'];
+  [[46,150],[330,146],[116,158],[272,156],[192,162]].forEach((pp,i)=>{
+    o+=`<rect x="${pp[0]-1}" y="${pp[1]}" width="2" height="70" fill="#6b4a2b"/><rect x="${pp[0]-26}" y="${pp[1]-18}" width="52" height="20" rx="2" fill="${cols[i]}" stroke="#222" stroke-width="1.5"/><text x="${pp[0]}" y="${pp[1]-4}" text-anchor="middle" font-size="9" font-weight="800" font-family="Arial,sans-serif" fill="${i%2?'#fff':'#111'}">${words[i]}</text>`;
+  });
+  return o+'</svg>';
+}
+function showRally(o,q,cb,fx){
+  const mood=o.mood||'calm';
+  const em={cheer:['👏','🇧🇷','❤️','📣','👍','✊'],boo:['😠','👎','🙄','😤'],calm:['🤔','📝','🤝','👀']}[mood];
+  const fl=em.map((e,i)=>`<span class="float-em" style="left:${8+i*15}%;animation-delay:${(i*.35).toFixed(2)}s">${e}</span>`).join('');
+  showCut(`<div class="pop overflow-hidden rounded-2xl border-4 border-white/80 bg-black shadow-2xl">
+    <div class="relative w-full overflow-hidden" style="aspect-ratio:4/3">
+      ${crowdSvg(mood)}
+      <div class="absolute bottom-0 left-1/2 w-[46%] -translate-x-1/2" style="aspect-ratio:1/1">${avatarSvg(st.look,st.age,st.power)}</div>
+      <div class="absolute bottom-0 left-1/2 h-[21%] w-[38%] -translate-x-1/2 rounded-t-xl" style="background:linear-gradient(#7a4a2b,#4f2f1c);border:2px solid #2b1a10;border-bottom:0"></div>
+      <div class="absolute left-1/2 -translate-x-1/2" style="bottom:20%;width:3px;height:13%;background:#222"></div>
+      <div class="absolute left-1/2 -translate-x-1/2 rounded-full" style="bottom:32.5%;width:10px;height:10px;background:#333;border:1px solid #888"></div>
+      ${fl}
+      <div class="absolute left-3 right-3 top-3 rounded-2xl bg-white px-3 py-2 text-sm font-bold leading-snug text-black shadow-lg">🎤 ${esc(o.s)}<span class="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 bg-white"></span></div>
+    </div>
+    <div class="bg-[#1d1d22] p-3 text-center"><div class="text-xs font-bold uppercase tracking-wider text-neutral-300">${esc(q.t)} · ${st.year}</div>${fx?`<div class="mt-2 flex flex-wrap justify-center gap-1.5">${fx}</div>`:''}<button data-cutclose class="mt-2 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div></div>`,
+    ()=>sfx('crowd'),cb);
+}
+
+/* ---------- conquistas ---------- */
+function badgeList(reason){
+  const c=st.cnt,h=st.hist.slice(1),avg=k=>h.length?h.reduce((s,x)=>s+x[k],0)/h.length:st[k];
+  return [
+   ['🛡️','Ficha Limpa','Terminou a carreira sem nenhum escândalo público.',st.scandals===0],
+   ['🚫','Incorruptível','Recusou 2 ou mais propostas de corrupção e não aceitou nenhuma.',(c.int||0)>=2&&!(c.corr||0)],
+   ['📢','Dedo na Ferida','Denunciou irregularidades 2 vezes ou mais.',(c.den||0)>=2],
+   ['🔎','Detetive de Fatos','Checou os dados em 2 ou mais casos de fake news.',(c.check||0)>=2],
+   ['🗣️','Voz do Povo','Atendeu 2 ou mais pedidos de participação popular.',(c.part||0)>=2],
+   ['🗳️','Aprovado nas Urnas','Venceu 2 ou mais eleições.',(c.elect||0)>=2],
+   ['🎖️','Faixa no Peito','Foi eleito ou eleita Presidente da República.',(c.pres||0)>=1],
+   ['🧗','Sobrevivente','Superou um processo de cassação ou impeachment.',st.procs>=1],
+   ['🔁','Trânsito Livre','Atuou nos três Poderes.',st.yearsBy.jud>0&&st.yearsBy.leg>0&&st.yearsBy.exe>0],
+   ['🏛️','Estadista','Média de prestígio, apoio e estabilidade acima de 68%.',(avg('pr')+avg('ap')+avg('es'))/3>=68],
+   ['📈','IDH em Alta','Elevou o IDH do país em 0,050 ou mais.',st.idh-st.startIdh>=0.05],
+   ['💰','Cofres em Ordem','Terminou com segurança jurídica e orçamento acima de 65%.',st.sj>=65],
+   ['🎓','Missão Cumprida','Chegou à aposentadoria aos 75 anos.',reason==='ret'],
+   ['🎭','Troca-troca','Trocou de partido 2 vezes ou mais.',(c.swap||0)>=2],
+   ['📰','Manchete Garantida','Esteve envolvido em 2 ou mais escândalos.',st.scandals>=2]
+  ];
+}
+function badgesHtml(reason){
+  const L=badgeList(reason).slice().sort((a,b)=>b[3]-a[3]),got=L.filter(b=>b[3]).length;
+  return `<div class="${CARD}"><div class="flex items-center justify-between"><h2 class="text-xs font-bold uppercase tracking-wider text-neutral-400">Conquistas de cidadão</h2><span class="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-bold text-amber-300">${got}/${L.length}</span></div>
+    <div class="mt-3 grid grid-cols-2 gap-2">${L.map(b=>`<div class="rounded-2xl border p-2.5 ${b[3]?'border-amber-400/40 bg-amber-400/10':'border-white/5 bg-black/25 opacity-45'}"><div class="text-2xl">${b[3]?b[0]:'🔒'}</div><div class="mt-1 text-sm font-bold leading-tight">${b[1]}</div><div class="mt-0.5 text-[11px] leading-snug text-neutral-300">${b[2]}</div></div>`).join('')}</div></div>`;
+}
+
+/* ===================== CALENDÁRIO ELEITORAL · CAMPANHA · RENÚNCIA ===================== */
+const G=(m,f)=>curGender()==='f'?f:m;
+function isGeneral(y){return (y-2026)%4===0;}
+function isMunicipal(y){return (y-2028)%4===0;}
+function nextGeneral(y){let k=y+1;while(!isGeneral(k))k++;return k;}
+const OFF={
+  dep:{n:'Deputado Federal',pw:'leg',rk:0,term:4,age:21,kind:'dep'},
+  sen:{n:'Senador da República',pw:'leg',rk:1,term:8,age:35,kind:'sen'},
+  gov:{n:'Governador de Estado',pw:'exe',rk:1,term:4,age:30,kind:'gov'},
+  pres:{n:'Presidente da República',pw:'exe',rk:2,term:4,age:35,kind:'pres'}
+};
+function curOff(){return st.power==='leg'?(st.rank===0?'dep':'sen'):st.power==='exe'?(st.rank===1?'gov':st.rank===2?'pres':null):null;}
+
+/* ---------- escolha genérica ---------- */
+let lastPick=null,lastItems=null;
+function choice(head,title,text,items,pick){
+  lastPick=pick;lastItems=items;
+  openModal(`<div class="text-xs font-bold uppercase tracking-wider text-sky-300">${head}</div>
+    <h2 class="mt-1 text-xl font-extrabold leading-tight">${title}</h2>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-300">${text}</p>
+    <div class="mt-3 space-y-3">${items.map((it,i)=>optBtn('data-ch',i,it.l,it.top||'ABCD'[i],(it.note?`<span class="text-[11px] font-semibold ${it.dis?'text-rose-300':'text-neutral-400'}">${it.note}</span>`:'')+(it.html||''))).join('')}</div>`);
+  modalEl.querySelectorAll('[data-ch]').forEach((b,i)=>{
+    if(items[i].dis)b.style.opacity='.45';
+    b.addEventListener('click',()=>{if(items[i].dis)return;closeModal();pick(i);});
+  });
+}
+
+/* ---------- ciclo: fatias de 2 anos com 3 eventos cada ---------- */
+function advance(){
+  if(busy||st.over)return;
+  busy=true;
+  startSlice(st.cycleLen/2);
+}
+function startSlice(left){
+  const years=Math.min(2,RETIRE-st.age);
+  if(years<=0)return endGame('ret');
+  const y0=st.year;st.lastYears=years;addYears(years);drift(years);
+  logAdd(`${years} anos se passaram (${y0} → ${st.year}).`);refreshDash();
+  timeSplash(y0,st.year,years,()=>{
+    const r=checkOver();if(r)return endGame(r);
+    if(st.age>=RETIRE)return endGame('ret');
+    st.sliceLeft=left-1;st.queue=buildQueue();slotStep();
+  });
+}
+function buildQueue(){
+  const q=['main','quick','quick'];
+  if(Math.random()<.3)q[1+Math.floor(Math.random()*2)]='main';
+  q.sort(()=>Math.random()-.5);
+  st.evTotal=q.length;st.evN=0;
+  return q;
+}
+function pickQuick(){
+  const pool=QUICK.filter(q=>q.p.includes(st.power)&&q.id!==st.lastQuick);
+  let av=pool.filter(q=>!st.usedQ.includes(q.id));
+  if(!av.length){st.usedQ=[];av=pool;}
+  if(!av.length)return null;
+  const q=rnd(av);st.usedQ.push(q.id);st.lastQuick=q.id;return q;
+}
+function slotStep(){
+  const r=checkOver();if(r)return endGame(r);
+  const slot=st.queue.shift();
+  if(!slot)return endSlice();
+  st.evN++;
+  if(slot==='quick'){const q=pickQuick();if(q)return showQuick(q,afterEvent);}
+  showEvent(pickEvent(),st.lastYears);
+}
+function afterEvent(){
+  const r=checkOver();if(r)return endGame(r);
+  snap();
+  runSteps([stepLeak,stepProcess,()=>slotStep()]);
+}
+function endSlice(){
+  runSteps([stepParty,stepCalendar,stepTransition,done=>{if(st.sliceLeft>0&&!st.over)startSlice(st.sliceLeft);else done();}]);
+}
+
+/* ---------- renúncia ---------- */
+function resign(){
+  if(busy||st.over)return;
+  busy=true;refreshDash();
+  const jud=st.power==='jud';
+  choice('🚪 Decisão difícil',jud?'Aposentar-se antecipadamente?':'Renunciar ao cargo?',
+    jud?'Você pode pedir aposentadoria antes dos 75 anos, mas isso encerra a sua carreira na magistratura.':'Renunciar encerra o seu mandato antes do tempo. Você pode deixar a política ou mudar de rumo, mas o eleitorado costuma cobrar caro por quem abandona o posto.',
+    [{top:'🚪',l:jud?'Aposentar-se e encerrar a carreira':'Renunciar e encerrar a carreira pública'},
+     {top:'🔀',l:'Mudar de rumo (perde popularidade)'},
+     {top:'↩️',l:'Voltar atrás'}],
+    i=>{
+      if(i===0)return endGame('ren');
+      if(i===1){applyEffects([-4,-8,-4,0,0,0],1);logAdd('Você renunciou para mudar de rumo.');refreshDash();return showTransition(()=>{busy=false;refreshDash();},true);}
+      busy=false;refreshDash();
+    });
+}
+
+/* ---------- calendário eleitoral ---------- */
+function stepCalendar(done){
+  const y=st.year,off=curOff();
+  if(isGeneral(y)){
+    if(off&&y>=st.termEnd)return candidacy(done);
+    if(st.power==='exe'&&!off&&st.age<=70)return candidacy(done);
+    logAdd(`Eleições gerais de ${y}: o Brasil escolheu presidente, governadores, senadores e deputados.`);
+    return done();
+  }
+  if(isMunicipal(y))return municipal(done);
+  done();
+}
+function municipal(done){
+  const y=st.year;
+  logAdd(`Eleições municipais de ${y}: o Brasil escolheu prefeitos e vereadores.`);
+  if(!st.filiado){
+    showHeadline({h:`Brasil vai às urnas: eleições municipais de ${y}`,sub:'Prefeitos e vereadores são escolhidos em todos os municípios do país.',tone:'mix'});
+    return done();
+  }
+  const sig=PARTIES[st.party].sig;
+  const it=[
+    {top:'📣',l:'Fazer campanha ao lado dos candidatos do partido',e:[0,3,5,0,0,0],bonus:60},
+    {top:'🏠',l:'Ficar neutro e cuidar do seu mandato',e:[2,0,-2,0,0,0],bonus:0},
+    {top:'🤝',l:'Apoiar candidatos de outro partido por aliança',e:[-2,0,4,0,0,2],bonus:-20}
+  ];
+  
+  choice(`🗳️ Eleições municipais · ${y}`,'O seu partido disputa as prefeituras',`${PARTIES[st.party].n} (${sig}) tem candidatos em todo o país. Os municípios escolhem prefeitos e vereadores. Como você vai atuar?`,it,i=>{
+    const o=it[i],d=applyEffects(o.e,1);
+    const n=Math.max(40,Math.round(300+(st.ap-50)*4+(st.es-50)*3+o.bonus+Math.random()*60-30)),up=n>=300;
+    const dd=applyEffects([0,0,up?4:-4,0,0,0],1);
+    logAdd(`${sig} elegeu ${n} prefeitos nas eleições municipais.`);refreshDash();
+    showHeadline({h:`${sig} elege ${n} prefeitos e ${up?'cresce':'encolhe'} no país`,sub:`${PARTIES[st.party].n} ${up?'amplia':'perde'} espaço nas eleições municipais de ${y}.`,tone:up?'pos':'neg'});
+    openModal(resultHtml('Resultado das municipais',`Seu partido elegeu ${n} prefeitos. ${up?'A base partidária se fortaleceu.':'A base partidária saiu enfraquecida.'}`,d.map((v,k)=>+(v+dd[k]).toFixed(3)),'Prefeitos e vereadores são eleitos a cada 4 anos, em anos diferentes das eleições para presidente, governador e deputados.'));
+    $('#go').addEventListener('click',()=>{closeModal();done();});
+  });
+}
+
+/* ---------- candidatura ---------- */
+function candidacy(done){
+  if(!st.filiado)return noParty(done);
+  const cur=curOff();
+  const mk=(key,reel)=>{
+    const o=OFF[key];let dis=false,note='';
+    if(st.age<o.age){dis=true;note=`Idade mínima: ${o.age} anos`;}
+    if(reel&&(key==='gov'||key==='pres')&&st.terms>=2){dis=true;note='Já cumpriu 2 mandatos seguidos';}
+    return {key,reel,dis,note,top:reel?'🔁':'🆕',l:reel?`Disputar a reeleição: ${gn(o.n)}`:`Disputar o cargo de ${gn(o.n)}`};
+  };
+  const items=[];
+  if(cur)items.push(mk(cur,true));
+  ({dep:['sen','gov'],sen:['gov','pres'],gov:['pres','sen'],pres:['sen']}[cur]||['gov','sen','dep']).forEach(k=>items.push(mk(k,false)));
+  items.push({stay:true,top:'🚪',l:cur?'Não disputar e deixar o cargo':'Seguir no ministério',note:cur?'Seu mandato termina e você terá que escolher outro rumo.':''});
+  choice(`🗳️ Eleições gerais · ${st.year}`,cur?'Fim de mandato: o que fazer?':'Convenção partidária',
+    cur?`Seu mandato de ${cargo()} chega ao fim. Perder a eleição encerra a sua carreira.`:'É ano de eleições. Você pode deixar o ministério para disputar um cargo, mas perder encerra a sua carreira.',
+    items,i=>{
+      const it=items[i];
+      if(it.stay){if(cur)return showTransition(done,true);logAdd('Você preferiu seguir no ministério.');return done();}
+      runCampaign(it.key,it.reel,done);
+    });
+}
+
+/* ---------- campanha: candidatos fictícios ---------- */
+const NAMES_F=['Marina Cavalcante','Helena Bastos','Beatriz Salgado','Lúcia Fontana','Clarice Monteiro','Isadora Vilela','Tereza Quintela','Aline Castelar','Rosana Pimentel','Paula Aragão','Débora Siqueira','Lívia Campelo'];
+const NAMES_M=['Augusto Pelegrino','Otávio Brandão','Teodoro Lins','Hélio Cardim','Fabrício Mendonça','Reginaldo Teixeira','Caetano Frota','Lauro Menezes','Ícaro Valadares','Murilo Sampaio','Edgar Linhares','Nelson Bittencourt'];
+function rndLook(g){
+  const hs=HAIRS[g];
+  return {gender:g,beard:g==='m'&&Math.random()<.35?rnd(['barba','bigode']):'none',skin:Math.floor(Math.random()*6),hair:rnd(hs)[0],hcol:Math.floor(Math.random()*4),glasses:Math.random()<.3};
+}
+let E=null;
+function makeRivals(n){
+  const f=NAMES_F.slice().sort(()=>Math.random()-.5),m=NAMES_M.slice().sort(()=>Math.random()-.5);
+  const others=Object.keys(PARTIES).filter(k=>k!==st.party).sort(()=>Math.random()-.5);
+  const fi=Math.floor(Math.random()*n),out=[];
+  for(let i=0;i<n;i++){
+    const g=i===fi?'f':(Math.random()<.45?'f':'m'),name=(g==='f'?f:m).pop();
+    out.push({name,first:name.split(' ')[0],look:rndLook(g),age:42+Math.floor(Math.random()*24),party:others[i%others.length],s:38+Math.random()*20+(E.key==='pres'?4:E.key==='gov'?2:0),sk:(()=>{const o={};TOP.forEach(t=>{o[t.k]=Math.random()*8-3;});return o;})()});
+  }
+  return out;
+}
+function myStrength(){
+  let sc=0.45*st.ap+0.2*st.pr+0.15*st.es+0.2*clamp((st.idh-0.6)/0.3*100);
+  sc-=['ap','pr','es'].filter(k=>st[k]<25).length*18;
+  sc-=Math.max(0,st.risk-40)*0.4;
+  sc+=E.reel?6:0;
+  return clamp(sc,5,95);
+}
+function shares(strs,noise){
+  const w=strs.map(x=>Math.pow(Math.max(5,x+(noise?(Math.random()-.5)*noise:0)),2)),t=w.reduce((a,b)=>a+b,0);
+  return w.map(x=>x/t*100);
+}
+function runCampaign(key,reel,done){
+  const y=st.year,off=OFF[key];
+  E={key,off,reel,done,y,bonus:0,seats:key==='dep'?5:key==='sen'?(((y-2026)%8===0)?2:1):1};
+  E.rivals=makeRivals(key==='dep'?11:key==='pres'?5:4);
+  E.strs=[myStrength(),...E.rivals.map(r=>r.s)];
+  E.p1=shares(E.strs,6);
+  showPoll(1,()=>askAd());
+}
+function pollTitle(){
+  const k=E.key;
+  return k==='pres'?'Presidente da República':k==='gov'?`Governo de ${esc(st.ufName)}`:k==='sen'?`Senado por ${esc(st.ufName)}`:`Câmara dos Deputados por ${esc(st.ufName)}`;
+}
+function pollRows(sh,und,base){
+  const k=(100-und)/100,rows=[{i:0,me:true,n:esc(st.name),p:st.filiado?PARTIES[st.party].sig:'S/P',look:st.look,age:st.age,v:sh[0]*k,t:base?(sh[0]-base[0])*k:0}];
+  E.rivals.forEach((r,i)=>rows.push({i:i+1,me:false,n:r.name,p:PARTIES[r.party].sig,look:r.look,age:r.age,v:sh[i+1]*k,t:base?(sh[i+1]-base[i+1])*k:0}));
+  return rows.sort((a,b)=>b.v-a.v);
+}
+function faceHtml(r,sz){return `<div class="shrink-0 overflow-hidden rounded-full border ${r.me?'border-amber-300':'border-white/25'} bg-black/30" style="width:${sz}px;height:${sz}px">${avatarSvg(r.look,r.age,'none')}</div>`;}
+function showPoll(stage,cb){
+  const und=stage===1?14:6,rows=pollRows(stage===1?E.p1:E.p2,und,stage===2?E.p1:null);
+  const shown=rows.slice(0,E.key==='dep'?6:4);
+  if(!shown.some(r=>r.me))shown[shown.length-1]=rows.find(r=>r.me);
+  const pos=rows.findIndex(r=>r.me)+1,max=rows[0].v;
+  const trend=r=>stage===2?(r.t>=.3?`<span class="text-emerald-400">▲ ${r.t.toFixed(1).replace('.',',')}</span>`:r.t<=-.3?`<span class="text-rose-400">▼ ${Math.abs(r.t).toFixed(1).replace('.',',')}</span>`:'<span class="text-neutral-500">=</span>'):'';
+  showCut(`<div class="pop rounded-2xl border border-sky-400/40 bg-[#101a2e] p-3 text-white shadow-2xl">
+    <div class="flex items-center justify-between text-[11px] font-bold tracking-wider text-sky-300"><span>📊 PESQUISA ELEITORAL ${stage===1?'· INÍCIO DA CAMPANHA':'· APÓS A CAMPANHA'}</span></div>
+    <div class="mt-1 text-lg font-extrabold leading-tight">${pollTitle()}</div>
+    <div class="text-[11px] text-neutral-400">Instituto Brasil em Números · registro fictício BR-${Math.floor(10000+Math.random()*89999)}/${E.y} · margem de erro ±2,2 p.p.</div>
+    <div class="mt-3 space-y-2.5">${shown.map(r=>`<div class="flex items-center gap-2">${faceHtml(r,38)}<div class="min-w-0 flex-1"><div class="flex justify-between text-xs"><span class="truncate font-semibold ${r.me?'text-amber-300':''}">${r.n} <span class="text-neutral-400">${r.p}</span></span><span class="tabular-nums">${r.v.toFixed(1).replace('.',',')}% ${trend(r)}</span></div><div class="mt-1 h-2.5 overflow-hidden rounded-full bg-white/10"><div class="h-full rounded-full" style="width:${(r.v/max*100).toFixed(0)}%;background:${r.me?'#fbbf24':'#38bdf8'}"></div></div></div></div>`).join('')}</div>
+    <div class="mt-2 text-[11px] text-neutral-400">Indecisos, brancos e nulos: ${und}%</div>
+    <div class="mt-2 rounded-xl bg-black/30 p-2 text-center text-sm font-bold">${pos===1?'Você aparece em 1º lugar.':`Você aparece em ${pos}º lugar.`}</div>
+    <button data-cutclose class="mt-3 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div>`,()=>sfx('paper'),cb);
+}
+
+/* ---------- propaganda eleitoral ---------- */
+function askAd(){
+  const ADS=[
+    {k:'tv',top:'📺',l:'Horário eleitoral na TV',b:4+st.es/25,e:[0,2,0,0,-2,0],d:'Grande alcance; o tempo de TV depende do tamanho da sua base.'},
+    {k:'pod',top:'🎧',l:'Podcast e entrevista individual',b:3+st.pr/30,e:[3,0,0,0,0,0],d:'Conversa longa, sem adversários. Não conta como debate.'},
+    {k:'com',top:'📣',l:'Comícios e caminhadas',b:4+st.ap/30,e:[0,3,0,0,0,0],d:'Contato direto e energia nas ruas.'},
+    {k:'red',top:'📱',l:'Redes sociais e influenciadores',b:5,e:[0,2,0,0,0,8],d:'Alcance viral e barato, mas pode render polêmicas e fake news.'}];
+  choice(`Etapa 2 de ${E.key==='dep'?3:4} · Propaganda eleitoral`,'Como será a sua propaganda?','Escolha o formato principal da sua campanha. A propaganda é uma etapa à parte: o debate com os adversários vem depois.',
+    ADS.map(a=>({top:a.top,l:a.l,note:a.d})),
+    i=>{
+      const a=ADS[i];E.bonus+=a.b;const d=applyEffects(a.e,1);refreshDash();
+      const fx=`<span class="inline-flex rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-bold text-sky-300">Força na pesquisa +${Math.round(a.b)}</span>`+chips(d);
+      showAd(a.k,()=>askDebate(),fx);
+    });
+}
+function showAd(k,cb,fx){
+  const slog=rnd(['Trabalho e respeito','Brasil para todos','Competência e honestidade','Futuro com coragem','Coragem para mudar']);
+  const me=avatarSvg(st.look,st.age,st.power),sig=PARTIES[st.party].sig;
+  const btn=(fx?`<div class="mt-3 flex flex-wrap justify-center gap-1.5">${fx}</div>`:'')+`<button data-cutclose class="mt-3 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button>`;
+  if(k==='com')return showRally({s:'Vamos juntos mudar essa história!',mood:'cheer'},{t:'Comício de campanha'},cb,fx);
+  if(k==='tv'){
+    return showCut(`<div class="pop overflow-hidden rounded-2xl bg-[#1b1b22] p-3 shadow-2xl">
+      <div class="text-center text-[11px] font-bold tracking-wider text-neutral-400">📺 HORÁRIO ELEITORAL GRATUITO</div>
+      <div class="relative mt-2 overflow-hidden rounded-2xl" style="aspect-ratio:4/3;border:10px solid #2a2a31;background:linear-gradient(#2c5fa8,#8fc6f0)">
+        <div class="absolute bottom-0 left-1/2 w-[58%] -translate-x-1/2" style="aspect-ratio:1/1">${me}</div>
+        <div class="absolute left-2 top-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">AO VIVO</div>
+        <div class="absolute inset-x-0 bottom-0 px-3 py-1 text-xs font-extrabold text-black" style="background:linear-gradient(90deg,#ffdf00,#ffd900 60%,#009c3b)">${esc(st.name)} · ${sig} · “${slog}”</div>
+      </div>
+      <p class="mt-2 text-center text-sm text-neutral-300">Seu programa vai ao ar em horário nobre.</p>${btn}</div>`,()=>sfx('jingle'),cb);
+  }
+  if(k==='pod'){
+    const host=rndLook(Math.random()<.5?'f':'m');
+    return showCut(`<div class="pop overflow-hidden rounded-2xl bg-[#1a1030] p-3 shadow-2xl">
+      <div class="text-center text-[11px] font-bold tracking-wider text-fuchsia-300">🎧 PODCAST · ENTREVISTA INDIVIDUAL</div>
+      <div class="relative mt-2 overflow-hidden rounded-xl" style="aspect-ratio:4/3;background:linear-gradient(#2a1b4d,#120a24)">
+        <div class="absolute right-3 top-3 rounded border border-red-400 px-2 py-0.5 text-xs font-extrabold tracking-widest text-red-400" style="box-shadow:0 0 12px #f87171">● NO AR</div>
+        <div class="absolute bottom-0 left-0 w-[46%]" style="aspect-ratio:1/1">${avatarSvg(host,38,'none')}</div>
+        <div class="absolute bottom-0 right-0 w-[46%]" style="aspect-ratio:1/1">${me}</div>
+        <div class="absolute bottom-[26%] left-[30%] h-3 w-6 rounded-full bg-neutral-900" style="border:1px solid #666"></div>
+        <div class="absolute bottom-[26%] right-[30%] h-3 w-6 rounded-full bg-neutral-900" style="border:1px solid #666"></div>
+        <div class="absolute left-3 top-12 max-w-[70%] rounded-2xl bg-white px-3 py-1.5 text-xs font-bold text-black">“Duas horas de conversa franca, sem roteiro.”</div>
+      </div>${btn}</div>`,()=>sfx('ding'),cb);
+  }
+  const handle=st.name.toLowerCase().replace(/[^a-z]/g,'')||'candidato';
+  showCut(`<div><div class="pop mx-auto w-[80%] overflow-hidden rounded-[2rem] bg-white text-black shadow-2xl" style="border:6px solid #2b2b33">
+      <div class="flex items-center gap-2 p-2"><div class="h-9 w-9 overflow-hidden rounded-full bg-neutral-200">${me}</div><div class="text-xs font-bold">@${handle}<div class="font-normal text-neutral-500">patrocinado · campanha</div></div></div>
+      <div class="relative flex h-40 items-center justify-center overflow-hidden" style="background:linear-gradient(135deg,#ffdf00,#009c3b)"><div class="px-3 text-center text-lg font-black text-white" style="text-shadow:0 2px 6px rgba(0,0,0,.4)">“${slog}”</div>
+        ${['❤️','🔥','👏','❤️'].map((e,i)=>`<span class="float-em" style="left:${12+i*22}%;bottom:8%;animation-delay:${i*.4}s">${e}</span>`).join('')}</div>
+      <div class="p-2 text-xs">❤️ ${(12+Math.floor(Math.random()*80))} mil curtidas · 💬 ${(2+Math.floor(Math.random()*9))} mil comentários</div></div>${btn}</div>`,()=>sfx('ding'),cb);
+}
+
+/* ---------- debate ---------- */
+const TOP=[
+  {k:'eco',t:'a economia e o emprego',data:true},
+  {k:'sau',t:'a saúde pública'},
+  {k:'edu',t:'a educação'},
+  {k:'seg',t:'a segurança pública'},
+  {k:'cor',t:'a corrupção e a transparência',data:true},
+  {k:'amb',t:'o meio ambiente'},
+  {k:'inf',t:'a infraestrutura e o transporte'},
+  {k:'imp',t:'os impostos e as contas públicas',data:true}];
+function topicBase(k){
+  switch(k){
+    case 'eco':return (st.sj-50)/5;
+    case 'sau':return (st.idh-0.76)*100;
+    case 'edu':return (st.idh-0.76)*90+(st.pr-50)/20;
+    case 'seg':return (st.es-50)/8;
+    case 'cor':return (55-st.risk)/6;
+    case 'amb':return (st.pr-50)/15;
+    case 'inf':return (st.sj-45)/8;
+    default:return (st.sj-50)/6+(st.es-50)/12;
+  }
+}
+const WEAK_REPLY=['Bem... é um tema complexo, e estamos estudando o assunto.','Isso será detalhado no plano de governo, no momento certo.','Eu prefiro falar de outro assunto, se me permite.'];
+const STRONG_REPLY=['Minha equipe tem um plano completo, e você nunca apresentou nada!','Pergunta fraca. Aliás, vamos falar do seu histórico nesse tema.','Os números estão aí, e eles me dão razão.'];
+const moodOf=g=>g>=3?'good':g<=-1?'bad':'neutral';
+function showDebate(first,line,reply,mood,cb,g){
+  const rv=E.rival,meAv=avatarSvg(st.look,st.age,st.power),rvAv=avatarSvg(rv.look,rv.age,'leg');
+  const n1=first==='me'?firstName():esc(rv.first),n2=first==='me'?esc(rv.first):firstName();
+  const em=mood==='good'?['👏','👏','🇧🇷','👍']:mood==='bad'?['😬','🙄','👎']:['🤔','👀','📝'];
+  const imp=typeof g==='number'?`<div class="mb-2 text-center text-xs font-bold ${g>=0?'text-emerald-300':'text-rose-300'}">Impacto na pesquisa: ${g>=0?'+':'−'}${Math.abs(g).toFixed(1).replace('.',',')} p.p.</div>`:'';
+  showCut(`<div class="pop overflow-hidden rounded-2xl bg-[#0e1b3a] shadow-2xl">
+    <div class="px-3 py-2 text-center text-xs font-extrabold tracking-wider text-white" style="background:linear-gradient(90deg,#1e3a8a,#0e1b3a)">🆚 DEBATE ELEITORAL · AO VIVO</div>
+    <div class="relative overflow-hidden" style="aspect-ratio:4/3;background:linear-gradient(#16306b,#0a1230)">
+      <div class="absolute inset-x-0 top-0 h-1/3 opacity-30" style="background:repeating-linear-gradient(90deg,#3b82f6 0 2px,transparent 2px 28px)"></div>
+      <div class="absolute bottom-0 left-1 w-[44%]" style="aspect-ratio:1/1">${meAv}</div>
+      <div class="absolute bottom-0 right-1 w-[44%]" style="aspect-ratio:1/1">${rvAv}</div>
+      <div class="absolute bottom-0 left-2 h-[20%] w-[40%] rounded-t-lg" style="background:linear-gradient(#4b5563,#1f2937)"></div>
+      <div class="absolute bottom-0 right-2 h-[20%] w-[40%] rounded-t-lg" style="background:linear-gradient(#4b5563,#1f2937)"></div>
+      ${em.map((e,i)=>`<span class="float-em" style="left:${10+i*22}%;bottom:40%;animation-delay:${(i*.4).toFixed(1)}s">${e}</span>`).join('')}
+      <div class="absolute left-2 right-2 top-2 space-y-1.5">
+        <div class="max-w-[88%] rounded-2xl bg-white px-3 py-1.5 text-xs font-bold leading-snug text-black ${first==='me'?'':'ml-auto'}"><span class="text-[10px] uppercase text-neutral-500">${n1}</span><br>${esc(line)}</div>
+        <div class="max-w-[88%] rounded-2xl bg-sky-100 px-3 py-1.5 text-xs font-bold leading-snug text-black ${first==='me'?'ml-auto':''}"><span class="text-[10px] uppercase text-neutral-500">${n2}</span><br>${esc(reply)}</div>
+      </div></div>
+    <div class="p-3">${imp}<button data-cutclose class="w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div></div>`,()=>sfx('crowd'),cb);
+}
+function askDebate(){
+  if(E.key==='dep')return finishCampaign();
+  E.rival=E.rivals.slice().sort((a,b)=>b.s-a.s)[0];
+  E.skill={};TOP.forEach(t=>{E.skill[t.k]=topicBase(t.k)+Math.random()*6-3;});
+  debateAsk();
+}
+function debateAsk(){
+  const rv=E.rival,pool=TOP.slice().sort(()=>Math.random()-.5).slice(0,4);
+  choice('Etapa 3 de 4 · Debate',`Debate contra ${esc(rv.name)}`,'Primeira rodada: você faz uma pergunta ao adversário. Cuidado: perguntar sobre um tema em que você é vulnerável pode virar o jogo.',
+    pool.map(t=>({top:'❓',l:`Perguntar sobre ${t.t}`})),
+    i=>{
+      const t=pool[i],sk=E.skill[t.k],rs=rv.sk[t.k];
+      let g=(sk-rs)*0.7+Math.random()*5-2.5;
+      if(t.k==='cor'&&st.risk>45)g-=4;
+      if(sk<-2)g-=2;
+      E.bonus+=g;if(g>0)rv.s-=g*.8;else rv.s+=-g*.5;
+      showDebate('me',`Pergunto a ${rv.first}: qual é o seu plano para ${t.t}?`,g>=1?rnd(WEAK_REPLY):rnd(STRONG_REPLY),moodOf(g),()=>debateAnswer(),g);
+    });
+}
+function debateAnswer(){
+  const rv=E.rival;
+  const t=TOP.slice().sort((a,b)=>(rv.sk[b.k]-E.skill[b.k])-(rv.sk[a.k]-E.skill[a.k]))[Math.floor(Math.random()*3)];
+  const sk=E.skill[t.k];
+  const opts=[
+    {l:'Resposta técnica, com dados e metas',note:'Exige domínio do tema',b:sk*.6+(st.pr-50)/14+Math.random()*3-1.5,line:'Tenho metas, números e prazos para cada ponto do plano.'},
+    {l:'Resposta emocional, falando com o povo',note:'Funciona melhor quando o apoio popular é alto',b:(st.ap-50)/12+(t.data?-1.5:.8)+Math.random()*4-2,line:'Eu conheço a dor do povo e vou resolver junto com vocês.'},
+    {l:'Atacar o adversário',note:'Alto risco',b:Math.random()<.45?5.5:-5,line:`Quem está preso ao passado é você, ${rv.first}!`,risk:true},
+    {l:'Desviar da pergunta e mudar de assunto',note:'Pode soar como fuga',b:Math.random()<.35?-4:-.5,line:'Antes de responder, preciso lembrar o que realmente importa para o país.'}];
+  choice('Etapa 3 de 4 · Debate',`${esc(rv.first)} pergunta a você`,`Segunda rodada: o adversário quer saber o seu plano para ${t.t}.`,opts.map(o=>({top:'🗣️',l:o.l,note:o.note})),i=>{
+    const o=opts[i];E.bonus+=o.b;
+    if(o.risk&&o.b<0)applyEffects([-2,0,-3,0,0,6],1);
+    refreshDash();
+    showDebate('rv',`${st.name.split(' ')[0]}, qual é o seu plano para ${t.t}?`,o.line,moodOf(o.b),()=>debateClose(),o.b);
+  });
+}
+function debateClose(){
+  const mine=myStrength()+E.bonus;
+  const rank=1+E.rivals.filter(r=>r.s>mine).length;
+  const opts=[
+    {l:'Apresentar propostas concretas',note:'Aposta na razão',b:(st.pr-50)/18+1.2+Math.random()*3-1.5,line:'Meu compromisso é com propostas concretas e prazos claros.'},
+    {l:'Apelar à emoção e à esperança',note:'Aposta no coração do eleitor',b:(st.ap-50)/15+Math.random()*4.5-2,line:'Eu peço a vocês: vamos acreditar no Brasil de novo!'},
+    {l:'Pedir o voto útil',note:'Só funciona para quem está entre os líderes',b:(rank<=2?2.5:-3.5)+Math.random()*3-1.5,line:'Se você quer mudar, o seu voto precisa contar. Vote útil!'},
+    {l:'Atacar os adversários',note:'Radicaliza o discurso',b:Math.random()<.4?4:-3,line:'Chega de promessas vazias: o povo merece respeito!'}];
+  choice('Etapa 3 de 4 · Debate','Considerações finais','Terceira rodada: cada candidato tem um minuto para pedir o voto do eleitor.',opts.map(o=>({top:'🎤',l:o.l,note:o.note})),i=>{
+    const o=opts[i];E.bonus+=o.b;
+    showDebate('me','Considerações finais: um minuto para cada candidato.',o.line,moodOf(o.b),()=>finishCampaign(),o.b);
+  });
+}
+function finishCampaign(){
+  E.strs=[myStrength()+E.bonus,...E.rivals.map(r=>r.s)];
+  E.p2=shares(E.strs,4);
+  showPoll(2,()=>countVotes());
+}
+
+/* ---------- apuração e resultado ---------- */
+function showCount(title,rows,resText,good,cb){
+  const max=rows[0].v;
+  showCut(`<div class="pop rounded-2xl border border-sky-400/40 bg-[#101a2e] p-3 text-white shadow-2xl">
+    <div class="flex items-center justify-between text-[11px] font-bold tracking-wider text-sky-300"><span>🗳️ APURAÇÃO · ${esc(title)}</span><span id="cpct">0%</span></div>
+    <div class="mt-3 space-y-2.5">${rows.map((r,i)=>`<div class="flex items-center gap-2">${faceHtml(r,36)}<div class="min-w-0 flex-1"><div class="flex justify-between text-xs"><span class="truncate font-semibold ${r.me?'text-amber-300':''}">${r.n} <span class="text-neutral-400">${r.p}</span></span><span class="tabular-nums" data-pv="${i}">0,0%</span></div><div class="mt-1 h-2.5 overflow-hidden rounded-full bg-white/10"><div data-pb="${i}" class="h-full rounded-full" style="width:0%;background:${r.me?'#fbbf24':'#38bdf8'};transition:width 2.4s ease"></div></div></div></div>`).join('')}</div>
+    <div id="cres" class="mt-3 min-h-[2.5rem] rounded-xl bg-black/30 p-2 text-center text-sm font-bold" style="opacity:0;transition:opacity .5s"></div>
+    <button data-cutclose class="mt-3 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div>`,
+    ()=>{
+      sfx('drum');
+      const el=$('#cut'),mine=curCut;
+      setTimeout(()=>{rows.forEach((r,i)=>{const b=el.querySelector(`[data-pb="${i}"]`);if(b)b.style.width=(r.v/max*100)+'%';});},80);
+      const t0=Date.now(),iv=setInterval(()=>{
+        if(curCut!==mine){clearInterval(iv);return;}
+        const k=Math.min(1,(Date.now()-t0)/2400);
+        el.querySelectorAll('[data-pv]').forEach((sp,i)=>{if(rows[i])sp.textContent=(rows[i].v*k).toFixed(1).replace('.',',')+'%';});
+        const cp=$('#cpct');if(cp)cp.textContent=Math.round(k*100)+'%';
+        if(k>=1){clearInterval(iv);const rs=$('#cres');if(rs){rs.textContent=resText;rs.style.opacity='1';}sfx(good?'fanfare':'pow');}
+      },60);
+    },cb);
+}
+function countVotes(){
+  const strs=E.strs,k=E.key,fin=shares(strs,12),rows=pollRows(fin,0,null),pos=rows.findIndex(r=>r.me);
+  const pct=r=>r.v.toFixed(1).replace('.',',');
+  if(k==='gov'||k==='pres'){
+    if(rows[0].v>=50){
+      E.win=rows[0].me;E.pct=rows[pos].v;
+      return showCount('1º turno',rows.slice(0,4),E.win?`✅ ${G('Você foi eleito','Você foi eleita')} com ${pct(rows[0])}% dos votos válidos!`:`❌ ${rows[0].n} vence no 1º turno.`,E.win,()=>afterElection());
+    }
+    if(pos>1){
+      E.win=false;E.pct=rows[pos].v;
+      return showCount('1º turno',rows.slice(0,4),'❌ Você não foi ao 2º turno.',false,()=>afterElection());
+    }
+    const a=rows[0],b=rows[1];
+    return showCount('1º turno',rows.slice(0,4),`Nenhum candidato passou de 50%: haverá 2º turno entre ${a.n} e ${b.n}.`,true,()=>{
+      const raw=shares([strs[a.i],strs[b.i]],10),rs=raw.map(v=>50+(v-50)*0.55),r2=[Object.assign({},a,{v:rs[0]}),Object.assign({},b,{v:rs[1]})].sort((x,y)=>y.v-x.v);
+      E.win=r2[0].me;E.pct=r2.find(r=>r.me).v;
+      showCount('2º turno',r2,E.win?`✅ ${G('Você foi eleito','Você foi eleita')} com ${pct(r2[0])}% dos votos válidos!`:`❌ ${r2[0].n} vence o 2º turno.`,E.win,()=>afterElection());
+    });
+  }
+  E.win=pos<E.seats;E.pct=rows[pos].v;
+  const shown=rows.slice(0,Math.max(E.seats+3,5));
+  if(!shown.some(r=>r.me))shown[shown.length-1]=rows[pos];
+  showCount('Resultado',shown,E.win?`✅ ${G('Você foi eleito','Você foi eleita')} com ${pct(rows[pos])}% dos votos!`:'❌ Você não conquistou uma vaga.',E.win,()=>afterElection());
+}
+function afterElection(){
+  const done=E.done,off=E.off,y=E.y,n=firstName();
+  if(!E.win){logAdd(`Derrota nas urnas em ${y}.`);return endGame('elec');}
+  const wasPres=st.power==='exe'&&st.rank===2;
+  if(E.reel&&st.power===off.pw)st.rank=Math.max(st.rank,off.rk);else{st.power=off.pw;st.rank=off.rk;}
+  st.terms=E.reel?st.terms+1:1;st.termEnd=y+off.term;
+  if(!E.reel){st.yearsPower=0;st.sinceOffer=0;}
+  if(E.reel)bump('reel');
+  bump('elect');if(off.kind==='pres')bump('pres');
+  const d=applyEffects([3,6,3,0,0,-4],1);
+  const pct=E.pct.toFixed(1).replace('.',',');
+  logAdd(`${G('Eleito','Eleita')} ${gn(off.n)} em ${y} com ${pct}% dos votos.`);
+  refreshDash();
+  const fin=()=>done();
+  if(off.kind==='pres'&&!wasPres)showSash();
+  showHeadline({h:E.reel?`${n} ${G('é reeleito','é reeleita')}: ${gn(off.n)} por mais ${off.term} anos`:`${n} ${G('é eleito','é eleita')} ${gn(off.n)}`,sub:`Com ${pct}% dos votos válidos, ${n} ${E.reel?'garante novo mandato':'conquista o cargo'} nas eleições de ${y}.`,tone:'pos'});
+  if(!E.reel){showComic('posse',off.pw,off.rk);showCargoInfo(off.pw,off.rk,fin,true);}
+  else fin();
+}
+function showSash(){
+  const u=++uid,exF=Math.random()<.5,exLook=rndLook(exF?'f':'m'),exName=exF?'Cecília Montalvão':'Anselmo Carvalhães';
+  const exAv=avatarSvg(exLook,69,'pres0').replace('<svg ','<svg x="10" y="62" width="150" height="150" ');
+  const meAv=avatarSvg(st.look,st.age,'pres0').replace('<svg ','<svg x="200" y="62" width="150" height="150" ');
+  const crowd=Array.from({length:26},(_,i)=>`<circle cx="${8+i*14}" cy="${224+(i%3)*3}" r="${6+(i%2)}" fill="${['#2b2b33','#3a2f4a','#2f3a4a'][i%3]}"/>`).join('');
+  const svg=`<svg viewBox="0 0 360 240" class="block w-full">${scene('exe',u)}<rect y="120" width="360" height="120" fill="#cfcfc9"/><path d="M118 120L242 120L318 240L42 240Z" fill="#b91c1c" stroke="#7f1313" stroke-width="2"/>${crowd}${exAv}${meAv}
+    <path d="M118 168Q180 190 222 166" stroke="#009c3b" stroke-width="11" fill="none" stroke-linecap="round"/><path d="M118 168Q180 190 222 166" stroke="#ffdf00" stroke-width="2.5" fill="none" stroke-dasharray="7 5"/>
+    <circle cx="175" cy="178.5" r="6" fill="#ffdf00" stroke="#1e3a9a" stroke-width="1.5"/></svg>`;
+  showCut(`<div class="pop overflow-hidden rounded-2xl bg-[#0d2a1a] shadow-2xl" style="border:4px solid #ffdf00">
+    <div class="px-3 py-2 text-center text-xs font-extrabold tracking-wider text-[#ffdf00]" style="background:#009c3b">🇧🇷 PASSAGEM DA FAIXA · PALÁCIO DO PLANALTO</div>
+    <div class="relative">${svg}
+      <div class="absolute left-2 top-2 max-w-[50%] rounded-2xl bg-white px-2 py-1 text-[11px] font-bold leading-snug text-black shadow">${exName}: “Que a faixa lhe sirva bem, Presidente!”</div>
+      <div class="absolute right-2 top-16 max-w-[48%] rounded-2xl px-2 py-1 text-[11px] font-bold leading-snug text-black shadow" style="background:#ffdf00">${firstName()}: “Prometo honrar este povo!”</div>
+    </div>
+    <div class="p-3 text-center"><div class="text-xs font-semibold text-neutral-300">1º de janeiro de ${(E?E.y:st.year)+1}</div><button data-cutclose class="mt-2 w-full rounded-xl bg-emerald-500 py-3 font-extrabold text-black active:scale-95">Continuar ▶</button></div></div>`,
+    ()=>{sfx('crowd');setTimeout(()=>sfx('fanfare'),300);});
+}
+
+function scaleFx(e,m){
+  const f=(v,i)=>{const good=i===5?v<0:v>0;return v*m*(good?KP:KN);};
+  return [Math.round(f(e[0],0)),Math.round(f(e[1],1)),Math.round(f(e[2],2)),+(f(e[3],3)/1000).toFixed(3),Math.round(f(e[4],4)),Math.round(f(e[5]||0,5))];
+}
+const PARTY_INFO={
+  PP:{ideal:'Reformas graduais para ampliar direitos e oportunidades, com foco em educação, saúde e inclusão social.',prior:'Apoio popular e desenvolvimento humano (IDH).',crit:'Opositores apontam risco de custos fiscais e de mudanças rápidas demais.'},
+  PS:{ideal:'Estado forte na redução de desigualdades, com serviços públicos universais, proteção ao trabalhador e redistribuição de renda.',prior:'Apoio popular e desenvolvimento humano (IDH).',crit:'Opositores apontam pressão sobre as contas públicas e menos incentivo ao investimento privado.'},
+  PI:{ideal:'Crescimento econômico apoiado em indústria, infraestrutura e segurança jurídica, com contas públicas equilibradas.',prior:'Estabilidade política, segurança jurídica e prestígio institucional.',crit:'Opositores apontam pouca atenção às desigualdades de curto prazo e ao meio ambiente.'},
+  PD:{ideal:'Fortalecimento das instituições, respeito às regras e equilíbrio entre os Poderes, com reformas negociadas.',prior:'Prestígio institucional, estabilidade e previsibilidade.',crit:'Opositores apontam lentidão e excesso de cautela diante de problemas urgentes.'}
+};
+function showPartyInfo(cb){
+  const lab='text-[11px] font-bold uppercase tracking-wide text-neutral-400';
+  openModal(`
+    <div class="flex items-center gap-2"><span class="grid h-7 w-7 place-items-center rounded-full border border-white/30 bg-white/10 text-sm font-extrabold italic">i</span><span class="text-xs font-bold uppercase tracking-wider text-sky-300">Panorama dos partidos</span></div>
+    <p class="mt-2 text-xs text-neutral-400">Os quatro partidos são fictícios. Cada um tem ideias e limites, e nenhum é melhor que o outro: a escolha depende de como você quer jogar.</p>
+    <div class="mt-3 space-y-3">${Object.keys(PARTIES).map(k=>{const x=PARTIES[k],i=PARTY_INFO[k];return `<div class="rounded-2xl bg-black/25 p-3">
+      <div class="text-sm font-extrabold">${x.em} ${x.n} <span class="text-neutral-400">(${x.sig})</span></div>
+      <div class="mt-2 space-y-1.5 text-[13px] leading-snug text-neutral-200">
+        <div><span class="${lab}">Ideais</span><br>${i.ideal}</div>
+        <div><span class="${lab}">Costuma priorizar</span><br>${i.prior}</div>
+        <div><span class="${lab}">Críticas comuns</span><br>${i.crit}</div></div></div>`;}).join('')}</div>
+    <p class="mt-3 text-[11px] leading-snug text-neutral-400">Na simulação, PP e PS favorecem decisões que elevam Apoio Popular e IDH; PI e PD, as que elevam Prestígio e Estabilidade.</p>
+    <button id="infoOk" class="mt-4 w-full rounded-2xl bg-emerald-500 py-3.5 text-base font-extrabold text-black transition active:scale-95">Entendi</button>`);
+  $('#infoOk').addEventListener('click',()=>{closeModal();if(cb)cb();});
+}
+
+const PCOL={PP:'#16a34a',PS:'#dc2626',PI:'#d97706',PD:'#2563eb'};
+const PDECOR={PP:['🌱','📚','🌿'],PS:['🌹','🏘️','🤝'],PI:['⚙️','🏭','🏗️'],PD:['🏛️','⚖️','🕊️']};
+Object.keys(PARTIES).forEach(k=>{OUTFIT['p'+k]={c:PCOL[k],tee:true,txt:k};});
+const AW={PP:[.4,1,.2,2.2,-.1,-.1],PS:[.2,1,-.3,2.2,-.5,-.1],PI:[.5,0,1,.4,1,-.2],PD:[1,.1,1,.4,.4,-.4]};
+function initAl(pref){const sum={PP:0,PS:0,PI:0,PD:0};sum[pref]=3.75;return {sum,n:3};}
+function updateAlign(e){
+  const al=st.al;
+  for(const k in AW){const sc=AW[k].reduce((a,w,i)=>a+w*(e[i]||0),0)/3;al.sum[k]=al.sum[k]*0.985+sc;}
+  al.n=al.n*0.985+1;
+}
+function alignOf(k){return clamp(50+8*(st.al.sum[k]/st.al.n),3,98);}
+
+/* ---------- bandeiras dos estados (simplificadas, em SVG) ---------- */
+const FB='#1a4aa6',FG='#1f8a3b',FY='#f5c400',FR='#d52b1e';
+const fr=(x,y,w,h,f)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${f}"/>`;
+const fstar=(cx,cy,r,f)=>{const p=[];for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?r*0.4:r;p.push((cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1));}return `<polygon points="${p.join(' ')}" fill="${f}"/>`;};
+const fshield=(cx,cy,k)=>`<path d="M${cx-7*k} ${cy-9*k}h${14*k}v${9*k}q0 ${8*k} ${-7*k} ${11*k}q${-7*k} ${-3*k} ${-7*k} ${-11*k}z" fill="#e3b93a" stroke="#6b5416" stroke-width="1"/>`;
+const fstripes=(cols,y0,h,x0,w)=>{const sh=h/cols.length;return cols.map((c,i)=>fr(x0,(y0+i*sh).toFixed(2),w,(sh+0.3).toFixed(2),c)).join('');};
+const FL={
+  AC:()=>fr(0,0,100,70,FY)+`<polygon points="0,70 100,0 100,70" fill="${FG}"/>`+fstar(16,15,10,FR),
+  AL:()=>fr(0,0,34,70,FR)+fr(33,0,34,70,'#fff')+fr(66,0,34,70,FB)+fshield(50,33,1.15),
+  AP:()=>fr(0,0,100,23,FB)+fr(0,47,100,23,FY)+fr(0,23,100,24,FG)+fr(0,21.5,100,2.5,'#fff')+fr(0,45.5,100,2.5,'#fff')+`<polygon points="0,0 0,70 40,35" fill="${FG}"/><rect x="6" y="30" width="16" height="9" fill="#fff" stroke="#000" stroke-width=".8"/><rect x="9" y="26" width="4" height="4" fill="#fff" stroke="#000" stroke-width=".8"/>`,
+  AM:()=>{let o=fr(0,0,100,70,'#fff')+fr(0,23.3,100,23.4,FR)+fr(0,0,40,40,FB);[[6,8],[15,4],[24,4],[33,8]].forEach(r=>{for(let i=0;i<r[1];i++){const x=r[1]===8?4+i*4.6:[9,15,25,31][i];o+=`<circle cx="${x}" cy="${r[0]}" r="1.4" fill="#fff"/>`;}});return o+fstar(20,19.5,3.6,'#fff');},
+  BA:()=>fstripes([FR,'#fff',FR,'#fff'],0,70,0,100)+fr(0,0,35,35,FB)+`<polygon points="17.5,7 6.5,28 28.5,28" fill="#fff"/>`,
+  CE:()=>fr(0,0,100,70,'#1f9a4a')+`<polygon points="50,5 95,35 50,65 5,35" fill="${FY}"/><circle cx="50" cy="35" r="17" fill="#fff"/><circle cx="50" cy="35" r="10" fill="#2a66c0"/><path d="M42 38q4-4 8 0t8 0" stroke="#fff" fill="none" stroke-width="1.4"/>`,
+  DF:()=>fr(0,0,100,70,'#fff')+fr(0,0,100,11,FG)+fr(0,59,100,11,FG)+`<path d="M44 20h12v10h10v12h-10v10h-12v-10h-10v-12h10z" fill="${FG}"/><polygon points="50,28 58,36 50,44 42,36" fill="#fff"/>`,
+  ES:()=>fstripes(['#7fcdf0','#fff','#f28cb8'],0,70,0,100)+fr(30,33,40,2.2,'#778')+fr(36,37,28,2.2,'#778'),
+  GO:()=>fstripes([FG,FY,FG,FY,FG,FY,FG,FY],0,70,0,100)+fr(0,0,40,35,FB)+fstar(10,9,3.6,'#fff')+fstar(30,9,3.6,'#fff')+fstar(10,26,3.6,'#fff')+fstar(30,26,3.6,'#fff')+fstar(20,17.5,3,'#fff'),
+  MA:()=>fstripes([FR,'#fff','#111','#fff',FR,'#fff','#111','#fff',FR],0,70,0,100)+fr(0,0,33,35,FB)+fstar(16.5,17.5,10,'#fff'),
+  MT:()=>fr(0,0,100,70,'#1a3f95')+`<polygon points="50,4 88,35 50,66 12,35" fill="#fff"/><circle cx="50" cy="35" r="15" fill="${FG}"/>`+fstar(50,35,8,FY),
+  MS:()=>fr(0,0,100,70,'#2057a7')+`<polygon points="0,0 40,0 0,56" fill="#2f9e44"/><polygon points="40,0 56,0 16,70 0,70 0,56" fill="#fff"/>`+fstar(84,56,8,FY),
+  MG:()=>fr(0,0,100,70,'#fff')+`<polygon points="26,14 74,14 50,56" fill="${FR}"/>`,
+  PA:()=>fr(0,0,100,70,'#c8102e')+fr(0,24,100,22,'#fff')+fstar(30,35,9,'#1a3f95'),
+  PB:()=>fr(0,0,33,70,'#111')+fr(33,0,67,70,'#c8102e')+`<text x="66" y="39" text-anchor="middle" font-size="10" font-weight="900" fill="#fff" font-family="Arial,sans-serif">NEGO</text>`,
+  PR:()=>fr(0,0,100,70,'#1f9a4a')+`<polygon points="0,0 24,0 100,53 100,70 76,70 0,17" fill="#fff"/><circle cx="50" cy="35" r="15" fill="#1a3f95"/><circle cx="50" cy="26" r="1.3" fill="#fff"/><circle cx="50" cy="40" r="1.3" fill="#fff"/><circle cx="44" cy="33" r="1.3" fill="#fff"/><circle cx="56" cy="33" r="1.3" fill="#fff"/><circle cx="50" cy="33" r="1.1" fill="#fff"/>`,
+  PE:()=>fr(0,0,100,70,'#2f6fd0')+fr(0,46,100,24,'#fff')+`<g fill="none" stroke-width="3.2"><path d="M26 46A24 24 0 0 1 74 46" stroke="${FR}"/><path d="M30 46A20 20 0 0 1 70 46" stroke="${FY}"/><path d="M34 46A16 16 0 0 1 66 46" stroke="${FG}"/></g><circle cx="50" cy="38" r="5" fill="${FY}"/>`+fstar(30,14,5,FY)+fstar(70,14,5,FY)+fr(44,56,12,3.4,FR)+fr(48.3,50,3.4,15,FR),
+  PI:()=>fstripes(Array.from({length:13},(_,i)=>i%2?FY:FG),0,70,0,100)+fr(73,0,27,27,'#10286e')+fstar(86.5,13.5,7,'#fff'),
+  RJ:()=>fr(0,0,100,70,'#fff')+fr(50,0,50,35,'#7ec8f0')+fr(0,35,50,35,'#7ec8f0')+`<ellipse cx="50" cy="35" rx="16" ry="24" fill="#1f4fa0" stroke="#d9a520" stroke-width="2.5"/><path d="M41 37l9-10 9 10-9 3z" fill="#d9a520"/>`,
+  RN:()=>fr(0,0,100,35,FG)+fr(0,35,100,35,'#fff')+`<circle cx="50" cy="35" r="13" fill="#fff" stroke="#6b5416" stroke-width="1.2"/><path d="M42 39h16l-3 4h-10z" fill="#d9a520"/><path d="M50 27v12" stroke="#6b5416" stroke-width="1.2"/>`,
+  RS:()=>fr(0,0,100,23.3,FG)+fr(0,23.3,100,23.4,FR)+fr(0,46.7,100,23.3,FY)+fshield(50,34,1.15),
+  RO:()=>fr(0,0,100,35,FB)+fr(0,35,100,35,FY)+`<polygon points="0,70 100,70 62,47 38,47" fill="${FG}"/>`+fstar(50,36,12,'#fff'),
+  RR:()=>fr(0,0,100,70,'#fff')+`<polygon points="0,0 62,0 0,43.4" fill="#00a9bd"/><polygon points="20,70 100,14 100,70" fill="${FG}"/>`+fr(0,52,100,5,FR)+fstar(50,42,15,FY),
+  SC:()=>fr(0,0,100,23.3,FR)+fr(0,23.3,100,23.4,'#fff')+fr(0,46.7,100,23.3,FR)+`<polygon points="50,10 80,35 50,60 20,35" fill="#4bb05a"/>`+fshield(50,35,.95),
+  SP:()=>fstripes(Array.from({length:13},(_,i)=>i%2?'#fff':'#111'),0,70,0,100)+fr(0,0,46,38,'#c8102e')+fstar(6,6,3.4,FY)+fstar(40,6,3.4,FY)+fstar(6,32,3.4,FY)+fstar(40,32,3.4,FY)+`<circle cx="23" cy="19" r="11" fill="#fff"/><path d="M17 16q4-5 9-2t3 8-6 5-8-6z" fill="#1f4fa0"/>`,
+  SE:()=>fstripes([FG,FY,FG,FY],0,70,0,100)+fr(0,0,35,35,FB)+fstar(17.5,17.5,6,'#fff')+fstar(8,8,3.4,'#fff')+fstar(27,8,3.4,'#fff')+fstar(8,27,3.4,'#fff')+fstar(27,27,3.4,'#fff'),
+  TO:()=>{let r='';for(let i=0;i<12;i++){const a=i*Math.PI/6;r+=`<line x1="${(16+10*Math.cos(a)).toFixed(1)}" y1="${(54+10*Math.sin(a)).toFixed(1)}" x2="${(16+15*Math.cos(a)).toFixed(1)}" y2="${(54+15*Math.sin(a)).toFixed(1)}" stroke="#e8a800" stroke-width="1.6"/>`;}return fr(0,0,100,70,FY)+`<polygon points="0,0 100,0 0,70" fill="${FB}"/><line x1="-6" y1="76" x2="106" y2="-6" stroke="#fff" stroke-width="17"/><circle cx="16" cy="54" r="8" fill="#e8a800"/>`+r;}
+};
+function flagSvg(uf){const f=FL[uf];return `<svg viewBox="0 0 100 70" preserveAspectRatio="xMidYMid slice" class="h-full w-full" aria-hidden="true">${f?f():fr(0,0,100,70,'#4b5563')}</svg>`;}
+const flagBox=(uf,cls)=>`<span class="inline-block shrink-0 overflow-hidden rounded-[3px] ring-1 ring-white/25 ${cls||'h-6 w-9'}">${flagSvg(uf)}</span>`;
+function pickUf(){
+  openModal(`<div class="text-xs font-bold uppercase tracking-wider text-sky-300">Estado de origem</div>
+    <div class="mt-3 grid gap-1.5">${UFS.map(u=>`<button data-uf="${u[0]}" class="flex items-center gap-3 rounded-xl px-2.5 py-2 text-left transition active:scale-[.98] ${draft.uf===u[0]?'bg-white/15 ring-1 ring-white/30':'bg-black/20 hover:bg-black/30'}">${flagBox(u[0])}<span class="flex-1 text-sm font-semibold">${u[1]}</span><span class="text-xs text-neutral-400">${u[0]}</span></button>`).join('')}</div>
+    <button id="ufClose" class="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold text-neutral-300 ring-1 ring-white/15 active:scale-95">Fechar</button>`);
+  modalEl.querySelectorAll('[data-uf]').forEach(b=>b.addEventListener('click',()=>{draft.uf=b.dataset.uf;closeModal();renderCreate();}));
+  $('#ufClose').addEventListener('click',closeModal);
+}
+
+/* ---------- Passagem de tempo ---------- */
+function timeSplash(from,to,years,done){
+  const pw=P[st.power];
+  openModal(`<div class="py-4 text-center">
+    <div class="text-xs font-bold uppercase tracking-wider text-neutral-400">⏳ O tempo passa · ${years} anos</div>
+    <div class="mx-auto mt-3 h-24 w-24 overflow-hidden rounded-3xl border border-white/10 bg-black/20">${avatarSvg(st.look,st.age,st.power)}</div>
+    <div id="yr" class="mt-3 text-6xl font-extrabold tabular-nums">${from}</div>
+    <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-black/40"><div id="yb" class="h-full rounded-full bg-emerald-400" style="width:0%;transition:width .2s linear"></div></div>
+    <div class="mt-2 text-sm font-semibold ${pw.txt}">${cargo()} · ${st.age} anos</div>
+    ${isGeneral(to)?'<div class="mt-1 text-xs font-bold text-amber-300">🗳️ Ano de eleições gerais</div>':isMunicipal(to)?'<div class="mt-1 text-xs font-bold text-amber-300">🗳️ Ano de eleições municipais</div>':''}
+    <div class="mt-1 text-[11px] text-neutral-500">Toque para pular</div></div>`);
+  const yr=$('#yr'),yb=$('#yb'),total=Math.max(1,to-from);
+  let y=from,fin=false,iv=null;
+  const end=()=>{if(fin)return;fin=true;clearInterval(iv);yr.textContent=to;yb.style.width='100%';setTimeout(()=>{closeModal();done();},350);};
+  iv=setInterval(()=>{y++;yr.textContent=y;yb.style.width=((y-from)/total*100)+'%';if(y>=to)end();},Math.max(130,Math.round(1000/total)));
+  $('#panel').addEventListener('click',end);
+}
+
+/* ---------- Transição de carreira ---------- */
+function check(req){
+  const lab={pr:'Prestígio',ap:'Apoio Popular',es:'Estabilidade'},miss=[],need=[];
+  for(const k of ['pr','ap','es'])if(req[k]){need.push(`${lab[k]} ≥ ${req[k]}%`);if(st[k]<req[k])miss.push(k);}
+  if(req.age){need.push(`idade ≥ ${req.age}`);if(st.age<req.age)miss.push('age');}
+  return {ok:!miss.length,need:need.join(' · ')};
+}
+function buildTransitions(){
+  const out=[],pw=P[st.power];
+  if(st.rank<pw.ranks.length-1){
+    const t=pw.ranks[st.rank+1];
+    out.push({title:`Buscar promoção: ${gn(t.n)}`,desc:'Seguir na mesma carreira e subir na hierarquia do poder.',power:st.power,rank:st.rank+1,...check(t.req)});
+  }
+  const cross={
+    jud:{rank:2,title:'Virar '+gn('Ministro de Tribunal Superior'),desc:'Indicação por notório saber jurídico e reputação ilibada.'},
+    leg:{rank:1,title:'Candidatar-se ao Senado',desc:'Um partido convida você para disputar uma cadeira de senador.'},
+    exe:{rank:0,title:st.power==='jud'?'Aceitar ser '+(curGender()==='f'?'Ministra':'Ministro')+' da Justiça':'Aceitar um Ministério',desc:'Convite do Presidente da República para integrar o governo.'}
+  };
+  for(const k of ['jud','leg','exe']){
+    if(k===st.power)continue;
+    const c=cross[k];
+    out.push({title:c.title,desc:c.desc,power:k,rank:c.rank,...check(P[k].ranks[c.rank].req)});
+  }
+  out.push({title:'Continuar no cargo atual',desc:'Seguir sua trajetória sem mudanças por enquanto.',power:st.power,rank:st.rank,ok:true,need:'',stay:true});
+  return out;
+}
+function showTransition(done,forced){
+  const opts=buildTransitions().filter(o=>!(forced&&o.stay)),pw=P[st.power];
+  if(forced)opts.push({title:'Encerrar a carreira pública',desc:'Deixar a política e se aposentar.',power:st.power,rank:st.rank,ok:true,need:'',quit:true});
+  openModal(`
+    <div class="text-xs font-bold uppercase tracking-wider ${pw.txt}">Janela de Oportunidade · ${st.year} · ${st.age} anos</div>
+    <h2 class="mt-1 text-xl font-extrabold leading-tight">Uma nova porta se abre</h2>
+    <p class="mt-2 text-sm leading-relaxed text-neutral-300">${forced?'Seu mandato terminou e você precisa decidir o próximo passo da sua vida pública.':`Depois de ${st.sinceOffer} anos de estrada, convites e possibilidades aparecem. Você pode mudar o rumo da sua vida pública.`}</p>
+    <div class="mt-4 space-y-3">
+      ${opts.map((o,i)=>{const tp=P[o.power];
+        return `<button data-tr="${i}" ${o.ok?'':'aria-disabled="true"'} class="w-full rounded-2xl border p-3 text-left transition ${o.ok?'border-white/10 bg-[#3a3a41] hover:bg-[#44444c] active:scale-[.98]':'cursor-not-allowed border-white/5 bg-black/20 opacity-50'}">
+          <div class="flex items-center gap-2"><span class="text-xl">${tp.em}</span><span class="flex-1 text-sm font-bold">${o.title}</span><span data-info="1" role="button" aria-label="Sobre o cargo" class="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-white/30 bg-white/10 text-xs font-extrabold italic transition active:scale-90">i</span></div>
+          <p class="mt-1 text-xs text-neutral-300">${o.desc}</p>
+          ${o.need?`<p class="mt-1.5 text-[11px] font-semibold ${o.ok?'text-emerald-300':'text-rose-300'}">${o.ok?'✔ ':'✖ '}Requisitos: ${o.need}</p>`:''}
+        </button>`;}).join('')}
+    </div>`);
+  modalEl.querySelectorAll('[data-tr]').forEach(b=>b.addEventListener('click',ev=>{
+    if(ev.target.closest('[data-info]')){const oo=opts[+b.dataset.tr];return showCargoInfo(oo.power,oo.rank,()=>showTransition(done));}
+    const o=opts[+b.dataset.tr];if(!o.ok)return;
+    if(o.quit){closeModal();return endGame('ren');}
+    const changedPower=o.power!==st.power;
+    st.power=o.power;st.rank=o.rank;st.sinceOffer=0;if(!o.stay){st.sinceElection=0;st.terms=1;st.termEnd=nextGeneral(st.year)+((o.power==='leg'&&o.rank>=1)?4:0);}
+    if(o.power==='jud'){if(st.filiado)logAdd('Como magistrado, você se desfiliou do partido.');st.filiado=false;}
+    else if(!st.filiado){st.filiado=true;st.lean=0;st.fbYear=st.year;st.partyPath.push(st.party);logAdd('Você se filiou ao '+PARTIES[st.party].n+'.');}
+    if(changedPower)st.yearsPower=0;
+    if(o.stay)logAdd('Você decidiu continuar no cargo atual.');
+    else logAdd(`Nova fase: ${o.title.replace('Aceitar ser ','').replace('Buscar promoção: ','')} (${P[o.power].n}).`);
+    const fin=()=>{done?done():(busy=false,refreshDash());};
+    if(o.stay){closeModal();fin();}else{showComic('posse',o.power,o.rank);showCargoInfo(o.power,o.rank,fin,true);}
+  }));
+}
+
+/* ===================== FIM DE JORNADA ===================== */
+const REASONS={
+  ret:{em:'🎓',title:'Aposentadoria aos 75 anos',desc:'Chegou a hora de pendurar a toga, a faixa ou o terno e passar o bastão.'},
+  pr:{em:'📉',title:'Perda total de prestígio',desc:{jud:'Denúncias de conduta antiética levaram ao seu afastamento pelo CNJ.',leg:'Um escândalo ético levou o Conselho de Ética a recomendar a cassação do seu mandato.',exe:'Escândalos corroeram sua credibilidade e você renunciou ao cargo.'}},
+  es:{em:'💥',title:{jud:'Crise institucional',leg:'Cassação do mandato',exe:'Impeachment'},desc:{jud:'Os outros poderes se uniram contra você e sua permanência no cargo se tornou insustentável.',leg:'Isolado e em guerra com os demais poderes, você perdeu o mandato.',exe:'Sem base no Congresso e em atrito com os demais poderes, você sofreu impeachment.'}},
+  ap:{em:'🗳️',title:{leg:'Derrota nas urnas',exe:'Rejeição popular total'},desc:{leg:'Sem apoio dos eleitores, você não conseguiu se reeleger.',exe:'Sem apoio nas ruas, seu governo desmoronou e você renunciou.'}},
+  elec:{em:'🗳️',title:'Derrota nas urnas',desc:{leg:'Você disputou a reeleição, mas os eleitores escolheram outro caminho.',exe:'Você disputou a reeleição e saiu derrotado: acabou o seu tempo no governo.',jud:'Derrota nas urnas.'}},
+  proc:{em:'⚖️',title:{jud:'Afastado pelo CNJ',leg:'Cassado pelo plenário',exe:'Impeachment aprovado'},desc:{jud:'O processo disciplinar terminou em afastamento e sua carreira na magistratura acabou.',leg:'O plenário votou pela perda do seu mandato.',exe:'O Senado condenou você por crime de responsabilidade e o afastou da Presidência da República ou do governo.'}},
+  ren:{em:'🚪',title:{jud:'Aposentadoria antecipada',leg:'Renúncia ao mandato',exe:'Renúncia ao cargo'},desc:{jud:'Você pediu aposentadoria antes dos 75 anos e deixou o Judiciário.',leg:'Você abriu mão do mandato e deixou a vida parlamentar.',exe:'Você renunciou ao cargo e deixou o governo.'}}
+};
+function joinPt(a){return a.length<2?(a[0]||''):a.slice(0,-1).join(', ')+' e '+a[a.length-1];}
+function legacyText(reason){
+  const h=st.hist.slice(1),avg=k=>h.length?h.reduce((s,x)=>s+x[k],0)/h.length:st[k];
+  const pr=avg('pr'),ap=avg('ap'),es=avg('es'),years=st.age-st.startAge;
+  const verbs=[];
+  if(st.yearsBy.jud)verbs.push('julgou');if(st.yearsBy.leg)verbs.push('legislou');if(st.yearsBy.exe)verbs.push('governou');
+  const intro=(reason==='ret'||reason==='ren')
+    ?`Você ${joinPt(verbs)||'serviu'} o Brasil por ${years} anos.`
+    :`Sua carreira durou ${years} anos e terminou de forma abrupta, aos ${st.age}.`;
+  const est=es>=65?'de extrema estabilidade institucional':es>=45?'de estabilidade razoável, com algumas turbulências':'de constantes crises com os outros poderes';
+  const apt=ap>=65?'forte apoio popular':ap>=45?'aprovação mediana':'baixa popularidade';
+  const prt=pr>=65?'reputação técnica e ética respeitada':pr>=45?'reputação mista':'reputação desgastada';
+  const t2=`Seu legado foi ${est}, com ${apt} e ${prt}.`;
+  const items=[['o prestígio',pr],['o apoio popular',ap],['a estabilidade política',es]].sort((a,b)=>b[1]-a[1]);
+  const t3=items[0][1]-items[2][1]<8?'Seus indicadores ficaram bem equilibrados ao longo da carreira.'
+    :`Seu ponto forte foi ${items[0][0]} (${Math.round(items[0][1])}% em média), mas ${items[2][0]} ficou como ponto fraco (${Math.round(items[2][1])}%) e cobrou seu preço.`;
+  const dl=st.idh-st.startIdh;
+  const idhT=dl>=0.04?'avançou bastante':dl>=0.01?'avançou de forma moderada':dl>=-0.01?'ficou praticamente estagnado':'retrocedeu';
+  const sjT=st.sj>=65?'segurança jurídica sólida e contas em ordem':st.sj>=40?'segurança jurídica e contas em situação razoável':'insegurança jurídica e contas públicas fragilizadas';
+  const t4=`Sob sua influência, o IDH do país ${idhT} (de ${fmtIdh(st.startIdh)} para ${fmtIdh(st.idh)}), e o Brasil terminou com ${sjT}.`;
+  const ex=[];
+  if(st.scandals>0||st.procs>0){
+    const a=st.scandals>0?`${st.scandals} escândalo${st.scandals>1?'s':''} público${st.scandals>1?'s':''}`:'';
+    const b=st.procs>0?`${st.procs} processo${st.procs>1?'s':''} de cassação ou afastamento superado${st.procs>1?'s':''}`:'';
+    ex.push(`Sua carreira foi marcada por ${[a,b].filter(Boolean).join(' e ')}.`);
+  } else if(st.risk<30)ex.push('Sua ficha ficou limpa: você manteve distância de escândalos e de esquemas.');
+  if(st.partyPath.length)ex.push(`Trajetória partidária: ${st.partyPath.join(' → ')}.`);
+  return [intro,t2,t3,t4,...ex];
+}
+function epithet(){
+  const h=st.hist.slice(1),avg=k=>h.length?h.reduce((s,x)=>s+x[k],0)/h.length:st[k];
+  const sc=(avg('pr')+avg('ap')+avg('es'))/3+(st.idh-st.startIdh)*200;
+  const f=st.look.gender==='f';return sc>=68?'Estadista':sc>=55?(f?'Servidora pública respeitada':'Servidor público respeitado'):sc>=42?(f?'Política de altos e baixos':'Político de altos e baixos'):'Figura controversa';
+}
+function chartSvg(){
+  let h=st.hist.slice();if(h.length<2)h=h.concat(h);
+  const W=320,Hh=150,L=28,Rr=8,T=8,B=20;
+  const a0=h[0].age,a1=Math.max(h[h.length-1].age,a0+1);
+  const x=a=>L+(a-a0)/(a1-a0)*(W-L-Rr),y=v=>T+(100-v)/100*(Hh-T-B);
+  const line=(k,c)=>`<polyline fill="none" stroke="${c}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${h.map(p=>x(p.age).toFixed(1)+','+y(p[k]).toFixed(1)).join(' ')}"/>`+h.map(p=>`<circle cx="${x(p.age).toFixed(1)}" cy="${y(p[k]).toFixed(1)}" r="2.5" fill="${c}"/>`).join('');
+  const grid=[0,50,100].map(v=>`<line x1="${L}" x2="${W-Rr}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,.12)" stroke-dasharray="3 3"/><text x="${L-4}" y="${y(v)+3}" text-anchor="end" font-size="9" fill="#9ca3af">${v}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${Hh}" class="w-full" role="img" aria-label="Evolução dos atributos ao longo da carreira">${grid}
+    <text x="${L}" y="${Hh-5}" font-size="9" fill="#9ca3af">${a0} anos</text><text x="${W-Rr}" y="${Hh-5}" text-anchor="end" font-size="9" fill="#9ca3af">${a1} anos</text>
+    ${line('pr','#fbbf24')}${line('ap','#38bdf8')}${line('es','#34d399')}</svg>
+    <div class="mt-1 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-neutral-300">
+      <span><b style="color:#fbbf24">●</b> Prestígio</span><span><b style="color:#38bdf8">●</b> Apoio Popular</span><span><b style="color:#34d399">●</b> Estabilidade</span></div>`;
+}
+function endGame(reason){
+  st.over=true;busy=true;snap();closeModal();refreshDash();
+  const R=REASONS[reason];
+  const title=typeof R.title==='string'?R.title:R.title[st.power];
+  const desc=typeof R.desc==='string'?R.desc:R.desc[st.power];
+  const paras=legacyText(reason);
+  const final=[['Prestígio Institucional',st.pr],['Apoio Popular',st.ap],['Estabilidade Política',st.es],['Segurança Jurídica / Orçamento',st.sj]];
+  const path=st.path.map(p=>`<li class="flex items-center justify-between gap-2 rounded-xl bg-black/25 px-3 py-2 text-sm"><span>${P[p.power].em} ${p.cargo}</span><span class="font-bold tabular-nums text-neutral-300">${p.years} anos</span></li>`).join('');
+  modalEl.innerHTML=`<div class="fixed inset-0 z-[60] overflow-y-auto bg-[#121212]"><div class="fade-in mx-auto max-w-md space-y-4 p-4" style="padding-top:calc(1rem + env(safe-area-inset-top,0px));padding-bottom:calc(2rem + env(safe-area-inset-bottom,0px))">
+    <div class="relative overflow-hidden ${CARD} text-center"><div class="absolute inset-0">${bannerSvg(reason==='ret'?'ret':bannerKindFor(st.power,st.rank))}</div><div class="absolute inset-0" style="background:linear-gradient(180deg,rgba(18,18,18,.35) 0%,rgba(18,18,18,.78) 70%,rgba(18,18,18,.88) 100%)"></div><div class="relative">
+      <div class="mx-auto h-28 w-28 overflow-hidden rounded-3xl border border-white/10 bg-black/20">${avatarSvg(st.look,st.age,st.power)}</div><div class="mt-2 text-3xl">${R.em}</div>
+      <div class="mt-2 text-xs font-bold uppercase tracking-wider text-neutral-400">${reason==='ret'?'Fim da jornada':'Fim de carreira'}</div>
+      <h1 class="mt-1 text-2xl font-extrabold">${title}</h1>
+      <p class="mt-1 text-sm text-neutral-300">${desc}</p>
+      <div class="mt-3 inline-block rounded-full bg-white/10 px-3 py-1 text-sm font-bold">${esc(st.name)} · ${epithet()}</div>
+      <div class="mt-2 text-xs font-semibold text-neutral-400">Carreira de ${st.startYear} a ${st.year}</div></div>
+    </div>
+    <div class="${CARD}">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-neutral-400">Painel de legado</h2>
+      <div class="mt-2 space-y-2 text-sm leading-relaxed text-neutral-100">${paras.map(p=>`<p>${p}</p>`).join('')}</div>
+    </div>
+    <div class="${CARD}">
+      <h2 class="mb-2 text-xs font-bold uppercase tracking-wider text-neutral-400">Seus status ao longo da carreira</h2>
+      ${chartSvg()}
+    </div>
+    <div class="${CARD} space-y-3">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-neutral-400">Status finais</h2>
+      ${final.map(f=>`<div><div class="flex justify-between text-sm"><span>${f[0]}</span><span class="tabular-nums text-neutral-300">${Math.round(f[1])}%</span></div><div class="mt-1 h-2.5 overflow-hidden rounded-full bg-black/40"><div class="h-full rounded-full" style="width:${clamp(f[1])}%;background:${colorOf(f[1])}"></div></div></div>`).join('')}
+      <div class="flex items-center justify-between text-sm"><span>IDH do Brasil</span><span class="font-bold tabular-nums">${fmtIdh(st.startIdh)} → ${fmtIdh(st.idh)}</span></div>
+    </div>
+    <div class="${CARD}">
+      <h2 class="mb-2 text-xs font-bold uppercase tracking-wider text-neutral-400">Trajetória</h2>
+      <ul class="space-y-2">${path}</ul>
+    </div>
+    ${badgesHtml(reason)}
+    <button id="again" class="w-full rounded-2xl bg-emerald-500 py-4 text-lg font-extrabold text-black shadow-lg transition active:scale-95">Jogar de novo 🔄</button>
+  </div></div>`;
+  if(reason==='ret')showComic('retire',st.power,st.rank);
+  $('#again').addEventListener('click',()=>{closeModal();draft={...draft,track:''};renderCreate();window.scrollTo(0,0);});
+}
+
+renderCreate();
+})();
+</script>
+</body>
+</html>
